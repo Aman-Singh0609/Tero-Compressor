@@ -1,0 +1,56 @@
+{
+  "name": "@tero/api",
+  "private": true,
+  "version": "2.0.0",
+  "type": "commonjs",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/server.js",
+    "test": "vitest run",
+    "lint": "eslint src tests",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:seed": "tsx prisma/seed.ts",
+    "cleanup": "tsx src/scripts/cleanup.ts",
+    "docs:api": "tsx src/scripts/generateApiDocs.ts",
+    "test:perf": "PERF=1 vitest run tests/perf",
+    "db:create": "tsx src/scripts/createDatabase.ts",
+    "storage:to-mysql": "tsx src/scripts/migrateFilesToMysql.ts"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cookie-parser": "^1.4.10",
+    "@types/express": "^5.0.6",
+    "@types/multer": "^2.3.0",
+    "@types/node": "^26.6.6",
+    "@types/supertest": "^7.2.1",
+    "eslint": "^10.14.0",
+    "prisma": "^6.19.3",
+    "supertest": "^7.3.1",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^5.0.5"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3",
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^16.6.1",
+    "express": "^5.3.0",
+    "jszip": "^3.10.2",
+    "multer": "^2.5.0",
+    "pdf-lib": "^1.17.1",
+    "pino": "^10.4.0",
+    "sharp": "^0.35.5",
+    "zod": "^4.6.7"
+  }
+}

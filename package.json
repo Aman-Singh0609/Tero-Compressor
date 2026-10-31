@@ -1,15 +1,25 @@
 {
-  "name": "file_compression",
-  "version": "1.0.0",
-  "main": "huffman.js",
+  "name": "tero",
+  "private": true,
+  "version": "2.0.0",
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "concurrently -n api,web -c blue,green \"npm run dev -w apps/api\" \"npm run dev -w apps/web\"",
+    "build": "npm run build -w apps/api && npm run build -w apps/web",
+    "start": "concurrently -n api,web \"npm run start -w apps/api\" \"npm run start -w apps/web\"",
+    "test": "npm run test -w apps/api",
+    "lint": "npm run lint -w apps/api && npm run lint -w apps/web",
+    "typecheck": "npm run typecheck -w apps/api && npm run typecheck -w apps/web",
+    "db:generate": "npm run db:generate -w apps/api",
+    "db:migrate": "npm run db:migrate -w apps/api",
+    "db:deploy": "npm run db:deploy -w apps/api",
+    "db:seed": "npm run db:seed -w apps/api"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
-  "dependencies": {
-    "jszip": "^3.10.1"
+  "devDependencies": {
+    "concurrently": "^9.2.5",
+    "prettier": "^3.9.10"
   }
 }

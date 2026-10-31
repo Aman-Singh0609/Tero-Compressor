@@ -1,0 +1,141 @@
+@import 'tailwindcss';
+
+:root {
+  --bg: #faf9f7;
+  --surface: #ffffff;
+  --surface-2: #f4f2ee;
+  --border: #e7e4de;
+  --border-strong: #d6d2c9;
+  --text: #1c1917;
+  --muted: #6b665e;
+  --accent: #0f766e;
+  --accent-hover: #0b5f59;
+  --accent-fg: #ffffff;
+  --accent-soft: #e4f3f0;
+  --danger: #b42318;
+  --danger-soft: #fdecea;
+  --warn: #9a5b0b;
+  --warn-soft: #fdf1dc;
+  --ok: #067647;
+  --ok-soft: #e4f5ec;
+  --info: #1f5fa8;
+  --info-soft: #e6effa;
+  --shadow: 0 1px 2px rgb(28 25 23 / 0.05), 0 1px 3px rgb(28 25 23 / 0.04);
+  --shadow-lg: 0 10px 30px rgb(28 25 23 / 0.1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14130f;
+    --surface: #1c1b17;
+    --surface-2: #24221d;
+    --border: #2f2d27;
+    --border-strong: #3e3b33;
+    --text: #f3f1ec;
+    --muted: #a39e93;
+    --accent: #2dd4bf;
+    --accent-hover: #5eead4;
+    --accent-fg: #06201d;
+    --accent-soft: #11332f;
+    --danger: #f97066;
+    --danger-soft: #3a1714;
+    --warn: #f5b546;
+    --warn-soft: #382a10;
+    --ok: #4ade80;
+    --ok-soft: #10301d;
+    --info: #7db4f0;
+    --info-soft: #13273f;
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.4);
+    --shadow-lg: 0 10px 30px rgb(0 0 0 / 0.5);
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+  --color-ink: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --shadow-card: var(--shadow);
+  --shadow-pop: var(--shadow-lg);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --radius-card: 14px;
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+@keyframes tero-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+@keyframes tero-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(350%);
+  }
+}
+@keyframes tero-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.tero-skeleton {
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--border) 37%, var(--surface-2) 63%);
+  background-size: 200% 100%;
+  animation: tero-shimmer 1.4s ease-in-out infinite;
+}
+.tero-rise {
+  animation: tero-rise 0.25s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

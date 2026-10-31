@@ -1,0 +1,28 @@
+# dependencies & build output
+node_modules/
+.next/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# secrets & local config
+.env
+.env.*
+!.env.example
+
+# runtime data (never commit user files)
+storage/
+uploads/
+compressed/
+*.log
+
+# legacy artefacts
+*.class
+ffmpeg2pass-*
+.tmp-storage-test/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.claude/

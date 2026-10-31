@@ -1,0 +1,280 @@
+{
+  "measuredAt": "2026-10-31T14:28:18.965Z",
+  "api": [
+    {
+      "label": "file list, default sort",
+      "url": "/api/v1/admin/files?page=1&limit=25",
+      "runs": 15,
+      "medianMs": 11,
+      "p95Ms": 12.7,
+      "maxMs": 15.6
+    },
+    {
+      "label": "file list, deep page",
+      "url": "/api/v1/admin/files?page=400&limit=25",
+      "runs": 15,
+      "medianMs": 49.2,
+      "p95Ms": 52.1,
+      "maxMs": 57.7
+    },
+    {
+      "label": "file list, filter type+status",
+      "url": "/api/v1/admin/files?type=pdf&status=AVAILABLE&limit=25",
+      "runs": 15,
+      "medianMs": 29.8,
+      "p95Ms": 32.1,
+      "maxMs": 32.5
+    },
+    {
+      "label": "file list, name search",
+      "url": "/api/v1/admin/files?q=wedding&limit=25",
+      "runs": 15,
+      "medianMs": 84.1,
+      "p95Ms": 86.5,
+      "maxMs": 87.3
+    },
+    {
+      "label": "file list, sort by size",
+      "url": "/api/v1/admin/files?sort=sizeBytes&order=desc&limit=25",
+      "runs": 15,
+      "medianMs": 98,
+      "p95Ms": 100.1,
+      "maxMs": 109.2
+    },
+    {
+      "label": "job list",
+      "url": "/api/v1/admin/jobs?limit=25",
+      "runs": 15,
+      "medianMs": 9.7,
+      "p95Ms": 10.1,
+      "maxMs": 11.3
+    },
+    {
+      "label": "job list, filter status",
+      "url": "/api/v1/admin/jobs?status=FAILED&limit=25",
+      "runs": 15,
+      "medianMs": 10.2,
+      "p95Ms": 13.1,
+      "maxMs": 15.4
+    },
+    {
+      "label": "audit log list",
+      "url": "/api/v1/admin/audit-logs?limit=25",
+      "runs": 15,
+      "medianMs": 9,
+      "p95Ms": 9.5,
+      "maxMs": 9.5
+    },
+    {
+      "label": "dashboard",
+      "url": "/api/v1/admin/dashboard",
+      "runs": 15,
+      "medianMs": 91.2,
+      "p95Ms": 94.7,
+      "maxMs": 101.6
+    },
+    {
+      "label": "storage",
+      "url": "/api/v1/admin/storage",
+      "runs": 15,
+      "medianMs": 12.5,
+      "p95Ms": 13.9,
+      "maxMs": 14.1
+    }
+  ],
+  "explain": [
+    {
+      "label": "files: list newest (ORDER BY createdAt DESC LIMIT)",
+      "prismaCallMs": 10.5,
+      "statementMs": [
+        1
+      ],
+      "plan": [
+        {
+          "table": "File",
+          "type": "ref",
+          "key": "File_role_createdAt_idx",
+          "rows": 9837,
+          "extra": "Backward index scan; Using index"
+        }
+      ]
+    },
+    {
+      "label": "files: category + status filter",
+      "prismaCallMs": 24.7,
+      "statementMs": [
+        23
+      ],
+      "plan": [
+        {
+          "table": "File",
+          "type": "ref",
+          "key": "File_status_createdAt_idx",
+          "rows": 9382,
+          "extra": "Using where; Backward index scan"
+        }
+      ]
+    },
+    {
+      "label": "files: status filter count",
+      "prismaCallMs": 23.7,
+      "statementMs": [
+        23
+      ],
+      "plan": [
+        {
+          "table": "File",
+          "type": "ref",
+          "key": "File_status_createdAt_idx",
+          "rows": 9264,
+          "extra": "Using where"
+        }
+      ]
+    },
+    {
+      "label": "files: retention scan (expiresAt, status)",
+      "prismaCallMs": 4.9,
+      "statementMs": [
+        3
+      ],
+      "plan": [
+        {
+          "table": "File",
+          "type": "range",
+          "key": "File_expiresAt_status_idx",
+          "rows": 9837,
+          "extra": "Using where; Using index"
+        },
+        {
+          "table": "t0",
+          "type": "ref",
+          "key": "ProcessingJob_fileId_idx",
+          "rows": 1,
+          "extra": "Using where; Not exists"
+        }
+      ]
+    },
+    {
+      "label": "jobs: list newest",
+      "prismaCallMs": 1.8,
+      "statementMs": [
+        1
+      ],
+      "plan": [
+        {
+          "table": "ProcessingJob",
+          "type": "index",
+          "key": "ProcessingJob_createdAt_idx",
+          "rows": 25,
+          "extra": "Backward index scan; Using index"
+        }
+      ]
+    },
+    {
+      "label": "jobs: filter status + newest",
+      "prismaCallMs": 2,
+      "statementMs": [
+        1
+      ],
+      "plan": [
+        {
+          "table": "ProcessingJob",
+          "type": "ref",
+          "key": "ProcessingJob_status_createdAt_idx",
+          "rows": 9516,
+          "extra": "Backward index scan; Using index"
+        }
+      ]
+    },
+    {
+      "label": "jobs: latest job per file (batched IN, no N+1)",
+      "prismaCallMs": 4.5,
+      "statementMs": [
+        1,
+        1
+      ],
+      "plan": [
+        {
+          "table": "ProcessingJob",
+          "type": "range",
+          "key": "ProcessingJob_fileId_idx",
+          "rows": 25,
+          "extra": "Using index condition; Using filesort"
+        }
+      ]
+    },
+    {
+      "label": "audit: list newest",
+      "prismaCallMs": 2.5,
+      "statementMs": [
+        1
+      ],
+      "plan": [
+        {
+          "table": "AuditLog",
+          "type": "index",
+          "key": "AuditLog_createdAt_idx",
+          "rows": 25,
+          "extra": "Backward index scan; Using index"
+        }
+      ]
+    },
+    {
+      "label": "audit: by entity",
+      "prismaCallMs": 2.2,
+      "statementMs": [
+        1
+      ],
+      "plan": [
+        {
+          "table": "AuditLog",
+          "type": "ref",
+          "key": "AuditLog_entityType_entityId_idx",
+          "rows": 1,
+          "extra": "Using index"
+        }
+      ]
+    },
+    {
+      "label": "dashboard: job aggregate (single pass)",
+      "plan": [
+        {
+          "table": "ProcessingJob",
+          "type": "ALL",
+          "key": null,
+          "rows": 19936,
+          "extra": null
+        }
+      ]
+    },
+    {
+      "label": "dashboard: uploads per day",
+      "plan": [
+        {
+          "table": "File",
+          "type": "range",
+          "key": "File_role_createdAt_idx",
+          "rows": 9837,
+          "extra": "Using where; Using index; Using temporary"
+        }
+      ]
+    },
+    {
+      "label": "dashboard: files by category",
+      "plan": [
+        {
+          "table": "File",
+          "type": "ref",
+          "key": "File_role_createdAt_idx",
+          "rows": 9837,
+          "extra": "Using temporary"
+        }
+      ]
+    }
+  ],
+  "dataset": {
+    "files": 20000,
+    "jobs": 20000,
+    "auditLogs": 20000
+  }
+}

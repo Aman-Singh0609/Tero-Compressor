@@ -1,0 +1,276 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum FileStatus {
+  UPLOADED
+  PROCESSING
+  AVAILABLE
+  FAILED
+  DELETED
+}
+
+enum FileRole {
+  UPLOAD // file supplied by a user
+  OUTPUT // file produced by a processor
+}
+
+enum JobStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum Operation {
+  IMAGE_COMPRESS
+  IMAGE_RESIZE
+  IMAGE_CONVERT
+  IMAGE_STRIP_METADATA
+  IMAGE_TO_PDF
+  PDF_COMPRESS
+  DOCX_COMPRESS
+  VIDEO_COMPRESS
+  VIDEO_EXTRACT_AUDIO
+}
+
+enum AuditAction {
+  ADMIN_LOGIN
+  ADMIN_LOGIN_FAILED
+  ADMIN_LOGOUT
+  FILE_VIEW
+  FILE_DOWNLOAD
+  FILE_DELETE
+  VAULT_UPLOAD
+  VAULT_VIEW
+  VAULT_DOWNLOAD
+  VAULT_UPDATE
+  VAULT_REPLACE
+  VAULT_DELETE
+  JOB_VIEW
+  SETTINGS_CHANGE
+}
+
+model Admin {
+  id           String         @id @default(uuid()) @db.Char(36)
+  email        String         @unique @db.VarChar(255)
+  passwordHash String         @db.VarChar(255)
+  name         String         @db.VarChar(120)
+  isActive     Boolean        @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  sessions     AdminSession[]
+  vaultFiles   VaultFile[]
+  auditLogs    AuditLog[]
+}
+
+/// Server-side sessions: only a SHA-256 hash of the cookie token is stored.
+model AdminSession {
+  id        String   @id @default(uuid()) @db.Char(36)
+  adminId   String   @db.Char(36)
+  tokenHash String   @unique @db.Char(64)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  ipAddress String?  @db.VarChar(64)
+  admin     Admin    @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId])
+  @@index([expiresAt])
+}
+
+/// Metadata for temporary user files (uploads and processor outputs). Bytes live in storage.
+model File {
+  id            String        @id @default(uuid()) @db.Char(36)
+  role          FileRole      @default(UPLOAD)
+  originalName  String        @db.VarChar(255)
+  storedName    String        @unique @db.VarChar(80)
+  extension     String        @db.VarChar(16)
+  mimeType      String        @db.VarChar(100)
+  category      String        @db.VarChar(16) // image | pdf | video | audio | document
+  sizeBytes     BigInt
+  storageArea   String        @db.VarChar(16)
+  storagePath   String        @db.VarChar(255) // relative to the storage root, never user-supplied
+  checksum      String        @db.Char(64)
+  status        FileStatus    @default(UPLOADED)
+  expiresAt     DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  deletedAt     DateTime?
+  jobs          ProcessingJob[] @relation("JobInput")
+  producedByJob ProcessingJob?  @relation("JobOutput")
+
+  @@index([createdAt])
+  @@index([status, createdAt])
+  @@index([category, createdAt])
+  @@index([expiresAt, status])
+  @@index([checksum])
+  @@index([role, createdAt])
+}
+
+model ProcessingJob {
+  id                   String     @id @default(uuid()) @db.Char(36)
+  fileId               String     @db.Char(36)
+  operation            Operation
+  options              Json?
+  status               JobStatus  @default(QUEUED)
+  progress             Int        @default(0)
+  originalSizeBytes    BigInt
+  outputSizeBytes      BigInt?
+  outputFileId         String?    @unique @db.Char(36)
+  startedAt            DateTime?
+  completedAt          DateTime?
+  failedAt             DateTime?
+  processingDurationMs Int?
+  errorCode            String?    @db.VarChar(64)
+  errorMessage         String?    @db.VarChar(500)
+  resultInfo           Json?
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
+  file                 File       @relation("JobInput", fields: [fileId], references: [id], onDelete: Restrict)
+  outputFile           File?      @relation("JobOutput", fields: [outputFileId], references: [id], onDelete: SetNull)
+  videoResult          VideoResult?
+  documentResult       DocumentResult?
+  pdfResult            PdfResult?
+  imageResult          ImageResult?
+
+  @@index([status, createdAt])
+  @@index([createdAt])
+  @@index([fileId])
+  @@index([operation, createdAt])
+}
+
+/// Files the administrator intentionally keeps. Never touched by retention cleanup.
+model VaultFile {
+  id                String    @id @default(uuid()) @db.Char(36)
+  displayName       String    @db.VarChar(255)
+  storedName        String    @unique @db.VarChar(80)
+  description       String?   @db.VarChar(1000)
+  mimeType          String    @db.VarChar(100)
+  extension         String    @db.VarChar(16)
+  category          String    @db.VarChar(16)
+  sizeBytes         BigInt
+  checksum          String    @db.Char(64)
+  storagePath       String    @db.VarChar(255)
+  uploadedByAdminId String?   @db.Char(36)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  lastDownloadedAt  DateTime?
+  downloadCount     Int       @default(0)
+  isAvailable       Boolean   @default(true)
+  uploadedBy        Admin?    @relation(fields: [uploadedByAdminId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([category, createdAt])
+  @@index([displayName])
+  @@index([uploadedByAdminId])
+}
+
+model AuditLog {
+  id         String      @id @default(uuid()) @db.Char(36)
+  adminId    String?     @db.Char(36)
+  action     AuditAction
+  entityType String?     @db.VarChar(32)
+  entityId   String?     @db.VarChar(64)
+  metadata   Json?
+  ipAddress  String?     @db.VarChar(64)
+  createdAt  DateTime    @default(now())
+  admin      Admin?      @relation(fields: [adminId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([adminId, createdAt])
+  @@index([action, createdAt])
+  @@index([entityType, entityId])
+}
+
+/// Binary storage inside MySQL (STORAGE_DRIVER=mysql). One row per stored file...
+model StorageObject {
+  id         String         @id @default(uuid()) @db.Char(36)
+  area       String         @db.VarChar(16)
+  storedName String         @db.VarChar(80)
+  sizeBytes  BigInt         @default(0)
+  complete   Boolean        @default(false) // false while chunks are still being written
+  createdAt  DateTime       @default(now())
+  chunks     StorageChunk[]
+
+  @@unique([area, storedName])
+  @@index([complete, createdAt])
+}
+
+/// ...and its bytes, split into 4 MB chunks so large videos never need one giant packet.
+model StorageChunk {
+  objectId String        @db.Char(36)
+  seq      Int
+  data     Bytes         @db.MediumBlob
+  object   StorageObject @relation(fields: [objectId], references: [id], onDelete: Cascade)
+
+  @@id([objectId, seq])
+}
+
+/// One row per finished image job (compress / resize / convert / strip metadata / to PDF).
+model ImageResult {
+  id               String        @id @default(uuid()) @db.Char(36)
+  jobId            String        @unique @db.Char(36)
+  operation        Operation
+  preset           String?       @db.VarChar(16)
+  targetFormat     String?       @db.VarChar(8)
+  inputWidth       Int?
+  inputHeight      Int?
+  outputWidth      Int?
+  outputHeight     Int?
+  metadataStripped Boolean       @default(false)
+  keptOriginal     Boolean       @default(false)
+  createdAt        DateTime      @default(now())
+  job              ProcessingJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([operation, createdAt])
+}
+
+/// One row per finished PDF job.
+model PdfResult {
+  id                 String        @id @default(uuid()) @db.Char(36)
+  jobId              String        @unique @db.Char(36)
+  preset             String?       @db.VarChar(16)
+  imagesFound        Int           @default(0)
+  imagesRecompressed Int           @default(0)
+  keptOriginal       Boolean       @default(false)
+  createdAt          DateTime      @default(now())
+  job                ProcessingJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+}
+
+/// One row per finished Word-document job.
+model DocumentResult {
+  id                 String        @id @default(uuid()) @db.Char(36)
+  jobId              String        @unique @db.Char(36)
+  preset             String?       @db.VarChar(16)
+  imagesFound        Int           @default(0)
+  imagesRecompressed Int           @default(0)
+  keptOriginal       Boolean       @default(false)
+  createdAt          DateTime      @default(now())
+  job                ProcessingJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+}
+
+/// One row per finished video job (compress / extract audio).
+model VideoResult {
+  id              String        @id @default(uuid()) @db.Char(36)
+  jobId           String        @unique @db.Char(36)
+  operation       Operation
+  preset          String?       @db.VarChar(16)
+  durationSeconds Float?
+  outputFormat    String        @db.VarChar(8)
+  keptOriginal    Boolean       @default(false)
+  createdAt       DateTime      @default(now())
+  job             ProcessingJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([operation, createdAt])
+}

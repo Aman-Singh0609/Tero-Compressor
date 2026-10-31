@@ -1,0 +1,60 @@
+export type ErrorCode =
+  | 'INVALID_FILE'
+  | 'FILE_TOO_LARGE'
+  | 'UNSUPPORTED_FILE_TYPE'
+  | 'FILE_NOT_FOUND'
+  | 'JOB_NOT_FOUND'
+  | 'VAULT_FILE_NOT_FOUND'
+  | 'INVALID_OPERATION'
+  | 'INVALID_OPTIONS'
+  | 'VALIDATION_ERROR'
+  | 'PROCESSING_FAILED'
+  | 'JOB_NOT_READY'
+  | 'JOB_NOT_CANCELLABLE'
+  | 'FILE_EXPIRED'
+  | 'UNAUTHORIZED'
+  | 'FORBIDDEN'
+  | 'INVALID_CREDENTIALS'
+  | 'TOO_MANY_REQUESTS'
+  | 'NOT_FOUND'
+  | 'DATABASE_ERROR'
+  | 'STORAGE_ERROR'
+  | 'INTERNAL_ERROR';
+
+const STATUS: Record<ErrorCode, number> = {
+  INVALID_FILE: 400,
+  FILE_TOO_LARGE: 413,
+  UNSUPPORTED_FILE_TYPE: 415,
+  FILE_NOT_FOUND: 404,
+  JOB_NOT_FOUND: 404,
+  VAULT_FILE_NOT_FOUND: 404,
+  INVALID_OPERATION: 400,
+  INVALID_OPTIONS: 400,
+  VALIDATION_ERROR: 400,
+  PROCESSING_FAILED: 500,
+  JOB_NOT_READY: 409,
+  JOB_NOT_CANCELLABLE: 409,
+  FILE_EXPIRED: 410,
+  UNAUTHORIZED: 401,
+  FORBIDDEN: 403,
+  INVALID_CREDENTIALS: 401,
+  TOO_MANY_REQUESTS: 429,
+  NOT_FOUND: 404,
+  DATABASE_ERROR: 500,
+  STORAGE_ERROR: 500,
+  INTERNAL_ERROR: 500,
+};
+
+export class AppError extends Error {
+  readonly status: number;
+
+  constructor(
+    readonly code: ErrorCode,
+    message: string,
+    readonly details?: unknown,
+  ) {
+    super(message);
+    this.name = 'AppError';
+    this.status = STATUS[code];
+  }
+}
