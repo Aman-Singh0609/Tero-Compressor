@@ -13,7 +13,7 @@ import { vaultRepository } from '../../repositories/vaultRepository';
 import { OPERATION_NAMES } from '../../processors/operations';
 import { audit } from '../../services/auditService';
 import { SESSION_COOKIE, login, logout } from '../../services/authService';
-import { publicJob } from '../../services/dto';
+import { adminJob } from '../../services/dto';
 import { deleteFile, getFileForDownload } from '../../services/fileService';
 import { getJob } from '../../services/jobService';
 import { runCleanup } from '../../services/retentionService';
@@ -248,14 +248,14 @@ adminRouter.get('/jobs', async (req, res) => {
     q.page,
     q.limit,
   );
-  ok(res, items.map(publicJob), { pagination: paginate(q.page, q.limit, total) });
+  ok(res, items.map(adminJob), { pagination: paginate(q.page, q.limit, total) });
 });
 
 adminRouter.get('/jobs/:id', async (req, res) => {
   const { id: jobId } = id.parse(req.params);
   const job = await getJob(jobId);
   await audit(ctx(req), 'JOB_VIEW', { type: 'ProcessingJob', id: jobId });
-  ok(res, publicJob(job));
+  ok(res, adminJob(job));
 });
 
 // ---- audit --------------------------------------------------------------

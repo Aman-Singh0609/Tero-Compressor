@@ -5,9 +5,19 @@ Drop a file, choose what you need, download the result. Nothing leaves your own 
 
 **Full code-level explanation:** see `functionalityRead.md`.
 
-**Today TERO can:** compress images (with presets), resize, convert JPG/PNG/WebP, strip private metadata, turn an image into a PDF,
-compress PDFs (by re-encoding embedded photos), compress Word files (pictures inside), compress video, and extract audio from video.
-An admin area shows uploads, jobs, storage, audit logs and a **Vault** of files the administrator keeps on purpose.
+**Today TERO has 31 tools, all running on your own machine — no internet needed once installed:**
+
+| Kind | Tools |
+| --- | --- |
+| **PDF** (16) | compress, merge, split (ranges / every N pages / every page), extract pages, remove pages, reorder pages, rotate, crop, watermark, page numbers, protect (AES-256), unlock, remove private info, PDF → images, PDF → text, PDF → Word |
+| **Word** (4) | compress, remove private info (author, comments, tracked changes), extract text, extract pictures |
+| **Image** (9) | compress (with a "make it under N KB" target), resize (pixels or percent), convert (JPG, PNG, WebP, AVIF, TIFF, GIF), crop, rotate/flip, watermark, brightness/contrast/greyscale, remove private info (EXIF/GPS), images → one PDF |
+| **Video** (2) | compress, extract audio (needs FFmpeg) |
+
+The tool list is a catalog in `apps/api/src/processors/operations.ts`; the web app renders every tool's form from `GET /api/v1/formats`, so a new tool needs no new form code.
+An admin area shows uploads, jobs (with the technical reason for any failure), storage, audit logs and a **Vault** of files the administrator keeps on purpose.
+
+**Why it works offline:** every engine is a plain npm package or WebAssembly module bundled in `node_modules` (pdf-lib, PDFium, qpdf, sharp, JSZip, opentype.js + bundled fonts). Nothing is downloaded or called at runtime and Next.js telemetry is switched off. Not built yet: Word → PDF (needs LibreOffice) and OCR for scanned PDFs.
 
 ## Architecture
 
@@ -16,7 +26,6 @@ apps/
   web/   Next.js 16 · React 19 · Tailwind 4 · typed API client      (port 3000)
   api/   Express 5 · TypeScript · Prisma · MySQL                      (port 4000)
 docs/    API.md (generated) · repository-audit.md · performance-report.md
-legacy/  archived pre-2.0 code (reference only)
 ```
 
 The browser talks only to the Next.js origin; `/api/*` is proxied to the API, so the admin cookie is first-party.
@@ -26,6 +35,9 @@ HTTP route (zod validation) → controller → service → repository → Prisma
                                    ↓
                               job queue → processor (image | pdf | document | video) → storage service
 ```
+
+Jobs can take **several input files** (merge, images → PDF): `ProcessingJob.fileId` is the first input and `JobInput(jobId, position, fileId)` keeps the ordered list. A tool can also produce a **ZIP** (split, PDF → images, extract pictures).
+Passwords for *Protect/Unlock PDF* are kept **only in memory** for the length of the job (`secretStore`); the database stores `[hidden]`, and they are never logged or returned.
 
 * **Controllers** (`src/http`) handle HTTP only. **Services** hold business rules. **Repositories** are the only code that touches Prisma and are timed individually.
 * **Processors** (`src/processors`) implement one contract (`validate`, `outputExtensionFor`, `process`, `cleanup`) and never see HTTP.
@@ -41,7 +53,8 @@ HTTP route (zod validation) → controller → service → repository → Prisma
 | --- | --- |
 | `Admin`, `AdminSession` | Admin accounts (bcrypt) and server-side sessions (only an HMAC of the cookie token is stored) |
 | `File` | Metadata for temporary uploads **and** processor outputs (`role` = UPLOAD/OUTPUT), checksum, status, `expiresAt` |
-| `ProcessingJob` | Operation, options, status, progress, sizes, duration, error, result info, link to output `File` |
+| `ProcessingJob` | Operation, options, status, progress, sizes, duration, error (+ admin-only `errorDetail`), result info, link to output `File` |
+| `JobInput` | Ordered input files of a job (merge, images → PDF) |
 | `VaultFile` | Files the admin intentionally keeps (never touched by retention) |
 | `AuditLog` | Admin actions (no secrets) |
 | `StorageObject`, `StorageChunk` | File bytes when `STORAGE_DRIVER=mysql` |
@@ -56,7 +69,7 @@ Lists order by `(sortField, id)` in the **same direction** so MySQL can walk the
 
 ## Prerequisites
 
-* Node.js 20+ (developed on 24) and npm 10+
+* Node.js **22+** (developed on 24) and npm 10+ — the PDF page renderer (PDFium WebAssembly) needs it
 * MySQL 8 (a local server, or Docker — see below)
 * FFmpeg + ffprobe on `PATH` (or set `FFMPEG_PATH` / `FFPROBE_PATH`) — only needed for video operations
 
@@ -108,6 +121,8 @@ Real secrets live only in `.env` files, which are git-ignored.
 | `CLEANUP_INTERVAL_MINUTES` | 60 | Scheduled cleanup |
 | `JOB_CONCURRENCY` | 2 | Parallel jobs |
 | `VIDEO_TIMEOUT_MINUTES` | 60 | FFmpeg hard limit |
+| `MAX_PDF_PAGES` / `MAX_RENDER_PAGES` | 1500 / 200 | Most pages a PDF tool will open / render to images in one job |
+| `MAX_IMAGE_PIXELS` | 120000000 | Larger pictures are refused (decompression-bomb guard) |
 | `SLOW_REQUEST_MS` / `SLOW_QUERY_MS` | 500 / 100 | Warn thresholds in the structured log |
 | `APP_ORIGIN` | `http://localhost:3000` | Comma-separated browser origins allowed for admin mutations (the host the browser used is also accepted) |
 | `COOKIE_SECURE` | prod: true | Set `false` to use the admin login over plain HTTP on a trusted home network |
@@ -134,7 +149,7 @@ The API also runs it on a timer, and admins can trigger it from **Admin → Stor
 ## Tests and checks
 
 ```bash
-npm test               # 137 API tests against a real MySQL test database (tero_test, created automatically)
+npm test               # 195 API tests against a real MySQL test database (tero_test, created automatically)
 npm run lint           # ESLint (api + web)
 npm run typecheck      # tsc --noEmit (api + web)
 npm run build          # production builds
@@ -156,7 +171,8 @@ Family flow:
 
 ```
 POST /api/v1/files/upload            multipart "file"  → { file, suggestedOperations }
-POST /api/v1/jobs                    { fileId, operation, options } → 202 { jobId, status: "QUEUED" }
+POST /api/v1/jobs                    { fileId | fileIds[], operation, options } → 202 { jobId, status: "QUEUED" }
+GET  /api/v1/formats                 → accepted types, limits and the tool catalog (labels, option form fields)
 GET  /api/v1/jobs/:id                → { status, progress, originalSizeBytes, outputSizeBytes, savingPercent, processingDurationMs, downloadUrl }
 GET  /api/v1/jobs/:id/download       → file
 DELETE /api/v1/files/:id             → remove now
@@ -164,11 +180,14 @@ DELETE /api/v1/files/:id             → remove now
 
 ## Security model
 
-* **Uploads:** size limit while streaming; type detected from **magic bytes** against an allow-list (JPEG, PNG, WebP, PDF, DOCX, MP4/MOV/WebM/MKV/AVI); the client extension must match the content (`invoice.pdf` that is really a PNG is rejected); Content-Type is never trusted; executables are unsupported by construction.
+* **Uploads:** size limit while streaming; type detected from **magic bytes** against an allow-list (JPEG, PNG, WebP, GIF, AVIF, TIFF, PDF, DOCX, MP4/MOV/WebM/MKV/AVI); the client extension must match the content (`invoice.pdf` that is really a PNG is rejected); Content-Type is never trusted; executables are unsupported by construction.
 * **Names/paths:** user file names are sanitised and kept only as display metadata. Physical names are generated UUIDs; the storage service rejects anything else and verifies the resolved path stays inside its area. Downloads resolve **only from database ids**.
 * **FFmpeg:** `spawn` with argument arrays, timeout, cancellation; no shell.
 * **Admin:** bcrypt password hashes, server-side sessions (new random token per login, HMAC stored, expiry, logout invalidates), `HttpOnly` + `SameSite=Lax` (+ `Secure` in production) cookie, login throttling (5 failures / 15 min per IP+email) plus per-IP rate limit, constant-time-ish unknown-user handling, `Origin` check on state-changing admin requests. **Every** admin route is guarded in the backend.
 * **Family access model:** there are no user accounts. File and job ids are random UUIDv4 capability tokens; anyone holding one can download that result. Files are deleted after `FILE_RETENTION_DAYS`.
+* **Document bombs:** Word files are checked by their declared unzipped size before opening; PDFs are limited by page count; images by pixel count; qpdf runs in a worker thread with a 250 MB / 5-minute limit; split output is capped at 500 files; ZIP entry names are generated (never taken from user text), so a crafted name cannot escape.
+* **Options:** every tool's options are validated by a strict zod schema on the server (unknown keys rejected); the browser form is only a convenience.
+* **Passwords:** PDF passwords live only in memory for the job; a server restart fails that job with a friendly message instead of keeping the secret.
 * **Errors:** one handler; no stack traces to clients. Logs are structured JSON with request ids and never include passwords, cookies or file contents.
 * Vault downloads are always `attachment` with `nosniff`; unknown content is served as `application/octet-stream`. Executable/script extensions cannot be stored.
 
@@ -190,8 +209,10 @@ The vault lives in its own table/directory and is never visited by cleanup.
 
 ## Limitations (honest list)
 
-* Not implemented yet: PDF merge/split/convert/Word→PDF/watermark/protect/unlock, audio tools, video convert/trim, batch uploads, multi-file operations. The UI only offers what the backend can do.
-* PDF compression only recompresses embedded **DCT (JPEG) RGB/Gray** images; vector/text-only PDFs are returned unchanged (and the result says so). It is not Ghostscript.
+* Not implemented yet: Word → PDF (needs LibreOffice), OCR for scanned PDFs, PDF editing of existing text, HEIC photos, video convert/trim. The UI only offers what the backend can do.
+* PDF → Word is **text only** (headings/paragraphs, no layout or pictures). PDF crop sets the visible box; the cropped-away content is still inside the file, so it is not a redaction tool.
+* PDF compression recompresses embedded JPEG and lossless 8-bit RGB/Gray images; vector/text-only PDFs are returned unchanged (and the result says so). It is not Ghostscript.
+* `npm audit` reports 3 high findings in Prisma's CLI dependency chain (build-time tooling, not the running server); fixing them needs Prisma 7.
 * The job queue is in-process (single API instance). Rate limiting and login throttling are in-memory.
 * Name search uses `LIKE '%…%'` (full scan, ~90 ms at 20k rows); deep pagination uses `OFFSET`.
 * Not tested here: the production `Secure` cookie flow over real HTTPS, S3/R2 storage (only the interface exists), Windows file-locking behaviour beyond a simulated locked file.

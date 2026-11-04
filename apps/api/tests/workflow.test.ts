@@ -21,7 +21,7 @@ describe('end-to-end workflow', () => {
     const up = await upload(src, 'Holiday Scan.pdf', 'application/pdf');
     expect(up.status).toBe(201);
     const fileId = up.body.data.file.id as string;
-    expect(up.body.data.suggestedOperations.map((o: { operation: string }) => o.operation)).toEqual(['PDF_COMPRESS']);
+    expect(up.body.data.suggestedOperations.map((o: { operation: string }) => o.operation)).toContain('PDF_COMPRESS');
 
     // 2. create job; it is queued, not run inside the request
     const created = await request()
@@ -109,13 +109,16 @@ describe('end-to-end workflow', () => {
     const res = await request().get('/api/v1/formats');
     expect(res.body.data.types.map((t: { extension: string }) => t.extension).sort()).toEqual([
       'avi',
+      'avif',
       'docx',
+      'gif',
       'jpg',
       'mkv',
       'mov',
       'mp4',
       'pdf',
       'png',
+      'tiff',
       'webm',
       'webp',
     ]);

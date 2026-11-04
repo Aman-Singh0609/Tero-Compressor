@@ -17,6 +17,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
 import { ApiError, authApi, type AdminIdentity } from '@/lib/api';
 import { cn } from '@/lib/cn';
+import { ModeSwitch } from '@/components/ModeSwitch';
 import { Wordmark } from '@/components/Wordmark';
 import { Button, ErrorState, Skeleton } from '@/components/ui/primitives';
 
@@ -132,7 +133,8 @@ export function AdminShell({ children }: { children: ReactNode }) {
             <Wordmark />
           </Link>
           <div className="ml-auto flex items-center gap-3">
-            <div className="hidden text-right sm:block">
+            <ModeSwitch current="admin" />
+            <div className="hidden text-right md:block">
               <p className="text-sm font-medium text-ink">{auth.admin.name}</p>
               <p className="text-xs text-muted">{auth.admin.email}</p>
             </div>

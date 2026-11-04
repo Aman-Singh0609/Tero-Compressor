@@ -19,11 +19,16 @@ import { sendStored } from '../sendFile';
 
 const idParam = z.object({ id: z.string().uuid('Invalid id') });
 
-const createJobBody = z.object({
-  fileId: z.string().uuid(),
-  operation: z.string().min(1).max(64),
-  options: z.record(z.string(), z.unknown()).optional(),
-});
+const createJobBody = z
+  .object({
+    fileId: z.string().uuid().optional(),
+    fileIds: z.array(z.string().uuid()).min(1).max(30).optional(),
+    operation: z.string().min(1).max(64),
+    options: z.record(z.string(), z.unknown()).optional(),
+  })
+  .refine((b) => (b.fileId === undefined) !== (b.fileIds === undefined), {
+    message: 'Send either fileId or fileIds',
+  });
 
 export const publicRouter = Router();
 
@@ -65,7 +70,7 @@ publicRouter.get('/files/:id/thumbnail', async (req, res) => {
   const copy = await storage().materialize(area as StorageArea, storedName);
   let bytes: Buffer;
   try {
-    bytes = await sharp(copy.path, { limitInputPixels: 268_435_456 })
+    bytes = await sharp(copy.path, { limitInputPixels: getEnv().MAX_IMAGE_PIXELS })
       .rotate()
       .resize({ width: 480, height: 480, fit: 'inside', withoutEnlargement: true })
       .webp({ quality: 70 })
@@ -85,7 +90,7 @@ publicRouter.delete('/files/:id', async (req, res) => {
 
 publicRouter.post('/jobs', rateLimit('jobs', 60, 60_000), async (req, res) => {
   const body = createJobBody.parse(req.body);
-  const job = await createJob(body.fileId, body.operation, body.options);
+  const job = await createJob(body.fileIds ?? [body.fileId as string], body.operation, body.options);
   ok(res, { jobId: job.id, status: job.status }, undefined, 202);
 });
 

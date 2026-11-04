@@ -53,7 +53,7 @@ function handleUnauthorized(path: string, err: ApiError): void {
 async function send<T, M = Record<string, unknown>>(
   method: string,
   path: string,
-  init: { query?: Query; json?: unknown; form?: FormData } = {},
+  init: { query?: Query; json?: unknown; form?: FormData; noRedirect?: boolean } = {},
 ): Promise<ApiSuccess<T, M>> {
   let res: Response;
   try {
@@ -69,7 +69,20 @@ async function send<T, M = Record<string, unknown>>(
   try {
     return await parse<T, M>(res);
   } catch (err) {
-    if (err instanceof ApiError) handleUnauthorized(path, err);
+    if (err instanceof ApiError && !init.noRedirect) handleUnauthorized(path, err);
+    throw err;
+  }
+}
+
+/**
+ * Like `get`, but a 401 ("not signed in") is an ordinary answer, not an error: it returns `null` and never
+ * redirects. Used on public pages to find out quietly whether the visitor is the signed-in admin.
+ */
+export async function getOrNullIfSignedOut<T>(path: string): Promise<T | null> {
+  try {
+    return (await send<T>('GET', path, { noRedirect: true })).data;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) return null;
     throw err;
   }
 }

@@ -1,9 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { adminApi, type Job, type OperationName } from '@/lib/api';
-import { formatBytes, formatDate, formatDuration, friendlyError, OPERATION_LABELS } from '@/lib/format';
+import { adminApi, type Job } from '@/lib/api';
+import { formatBytes, formatDate, formatDuration, friendlyError } from '@/lib/format';
 import { useResource } from '@/lib/hooks';
+import { CATEGORY_LABELS } from '@/components/tools/toolIcons';
+import { useTools } from '@/lib/tools';
 import { DetailList, PageHeader, Pager, SelectFilter, TableSkeleton, Th, Toolbar } from '@/components/admin/common';
 import {
   Badge,
@@ -16,9 +18,9 @@ import {
   statusTone,
 } from '@/components/ui/primitives';
 
-const OPS = Object.entries(OPERATION_LABELS) as Array<[OperationName, string]>;
-
 export default function JobsPage() {
+  const { tools, label: opLabel } = useTools();
+  const OPS = tools.map((t): [string, string] => [t.operation, `${CATEGORY_LABELS[t.category]} · ${t.label}`]);
   const [status, setStatus] = useState('');
   const [operation, setOperation] = useState('');
   const [page, setPage] = useState(1);
@@ -89,7 +91,7 @@ export default function JobsPage() {
                           {j.fileName ?? j.fileId}
                         </button>
                       </td>
-                      <td className="px-4 py-3 text-muted">{OPERATION_LABELS[j.operation]}</td>
+                      <td className="px-4 py-3 text-muted">{opLabel(j.operation)}</td>
                       <td className="px-4 py-3">
                         <Badge tone={statusTone(j.status)}>{j.status.toLowerCase()}</Badge>
                       </td>
@@ -118,6 +120,7 @@ export default function JobsPage() {
 }
 
 function JobDrawer({ id, onClose }: { id: string | null; onClose: () => void }) {
+  const { label: opLabel } = useTools();
   const detail = useResource(() => (id ? adminApi.job(id) : Promise.resolve(undefined)), [id]);
   const j: Job | undefined = id ? detail.data : undefined;
   return (
@@ -125,7 +128,7 @@ function JobDrawer({ id, onClose }: { id: string | null; onClose: () => void }) 
       side
       open={id !== null}
       onOpenChange={(o) => !o && onClose()}
-      title={j ? OPERATION_LABELS[j.operation] : 'Job details'}
+      title={j ? opLabel(j.operation) : 'Job details'}
       description={j?.fileName ?? undefined}
     >
       {detail.loading && !j ? (
@@ -151,10 +154,11 @@ function JobDrawer({ id, onClose }: { id: string | null; onClose: () => void }) 
               ['Duration', formatDuration(j.processingDurationMs)],
               ['Created', formatDate(j.createdAt)],
               ['Completed', formatDate(j.completedAt)],
+              ['Files in', j.inputs.length ? String(j.inputs.length) : '1'],
               [
                 'Options',
-                <code key="o" className="text-xs">
-                  {JSON.stringify(j.options)}
+                <code key="o" className="text-xs break-all">
+                  {JSON.stringify(j.options ?? {})}
                 </code>,
               ],
               ...(j.error
@@ -163,6 +167,34 @@ function JobDrawer({ id, onClose }: { id: string | null; onClose: () => void }) 
               ...(j.result?.note ? ([['Note', String(j.result.note)]] as Array<[string, string]>) : []),
             ]}
           />
+          {j.inputs.length > 0 && (
+            <div>
+              <h3 className="mb-2 text-sm font-semibold text-ink">Input files (in order)</h3>
+              <ol className="list-inside list-decimal space-y-1 text-sm text-muted">
+                {j.inputs.map((i) => (
+                  <li key={i.id} className="break-all">
+                    <span className="text-ink">{i.name}</span> · {formatBytes(i.sizeBytes)}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+          {j.result && Object.keys(j.result).length > 0 && (
+            <div>
+              <h3 className="mb-2 text-sm font-semibold text-ink">What the tool reported</h3>
+              <pre className="max-h-48 overflow-auto rounded-lg bg-surface-2 p-3 text-xs break-words whitespace-pre-wrap text-ink">
+                {JSON.stringify(j.result, null, 2)}
+              </pre>
+            </div>
+          )}
+          {j.errorDetail && (
+            <div>
+              <h3 className="mb-2 text-sm font-semibold text-danger">Technical detail (admins only)</h3>
+              <pre className="max-h-64 overflow-auto rounded-lg bg-danger-soft p-3 text-xs break-words whitespace-pre-wrap text-ink">
+                {j.errorDetail}
+              </pre>
+            </div>
+          )}
         </div>
       ) : null}
     </Modal>

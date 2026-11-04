@@ -61,8 +61,8 @@ describe('files that look like video but are not', () => {
   it.each([
     ['photo.heic', 'heic'],
     ['photo.heif', 'mif1'],
-    ['photo.avif', 'avif'],
     ['song.m4a', 'M4A '],
+    ['anim.avif', 'avis'],
   ])('%s (brand %s) is refused as unsupported, not mistaken for MP4', async (name, brand) => {
     const res = await upload(ftyp(brand), name);
     expect(res.status).toBe(415);

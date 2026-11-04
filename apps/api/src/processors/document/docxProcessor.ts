@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import JSZip from 'jszip';
 import sharp from 'sharp';
 import type { OperationName, Preset } from '../operations';
+import { loadOfficeZip } from '../shared/docxZip';
 import { ProcessorError, type Processor, type ProcessorInput, type ProcessorResult } from '../types';
 
 const QUALITY: Record<Preset, number> = { HIGH_QUALITY: 85, BALANCED: 72, SMALLEST: 55 };
@@ -20,12 +21,8 @@ export class DocxProcessor implements Processor {
     return 'docx';
   }
 
-  private async load(path: string): Promise<JSZip> {
-    try {
-      return await JSZip.loadAsync(await fs.readFile(path));
-    } catch (err) {
-      throw new ProcessorError('This document could not be read. It may be damaged.', 'INVALID_FILE', { cause: err });
-    }
+  private load(path: string): Promise<JSZip> {
+    return loadOfficeZip(path); // refuses zip bombs before anything is inflated
   }
 
   async process(input: ProcessorInput): Promise<ProcessorResult> {

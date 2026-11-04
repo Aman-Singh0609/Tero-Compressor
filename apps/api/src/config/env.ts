@@ -36,6 +36,10 @@ const schema = z.object({
   SESSION_SECRET: z.string().min(32, 'SESSION_SECRET must be at least 32 characters'),
   SESSION_TTL_HOURS: z.coerce.number().positive().default(12),
   JOB_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(2),
+  /** Safety limits so one hostile or huge document cannot exhaust memory. */
+  MAX_PDF_PAGES: z.coerce.number().int().positive().default(1500),
+  MAX_RENDER_PAGES: z.coerce.number().int().positive().default(200),
+  MAX_IMAGE_PIXELS: z.coerce.number().int().positive().default(120_000_000),
   VIDEO_TIMEOUT_MINUTES: z.coerce.number().positive().default(60),
   FFMPEG_PATH: z.string().default('ffmpeg'),
   FFPROBE_PATH: z.string().default('ffprobe'),

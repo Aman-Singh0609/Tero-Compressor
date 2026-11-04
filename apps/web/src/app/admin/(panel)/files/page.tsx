@@ -4,8 +4,9 @@ import { Download, Trash2 } from 'lucide-react';
 import { Suspense, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { adminApi, ApiError, type AdminFileRow } from '@/lib/api';
-import { formatBytes, formatDate, formatDuration, friendlyError, OPERATION_LABELS } from '@/lib/format';
+import { formatBytes, formatDate, formatDuration, friendlyError } from '@/lib/format';
 import { useDebounced, useResource } from '@/lib/hooks';
+import { useTools } from '@/lib/tools';
 import {
   DetailList,
   PageHeader,
@@ -165,6 +166,7 @@ function Files() {
 }
 
 function FileRow({ file, onOpen }: { file: AdminFileRow; onOpen: () => void }) {
+  const { label: opLabel } = useTools();
   const job = file.jobs[0];
   return (
     <tr className="hover:bg-surface-2/50">
@@ -184,7 +186,7 @@ function FileRow({ file, onOpen }: { file: AdminFileRow; onOpen: () => void }) {
         <Badge tone={statusTone(file.status)}>{file.status.toLowerCase()}</Badge>
       </td>
       <td className="hidden px-4 py-3 text-muted lg:table-cell">
-        {job ? `${OPERATION_LABELS[job.operation]} · ${formatDuration(job.processingDurationMs)}` : '—'}
+        {job ? `${opLabel(job.operation)} · ${formatDuration(job.processingDurationMs)}` : '—'}
       </td>
       <td className="hidden px-4 py-3 whitespace-nowrap text-muted sm:table-cell">{formatDate(file.createdAt)}</td>
     </tr>
@@ -192,6 +194,7 @@ function FileRow({ file, onOpen }: { file: AdminFileRow; onOpen: () => void }) {
 }
 
 function FileDrawer({ id, onClose, onChanged }: { id: string | null; onClose: () => void; onChanged: () => void }) {
+  const { label: opLabel } = useTools();
   const detail = useResource(() => (id ? adminApi.file(id) : Promise.resolve(undefined)), [id]);
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -280,7 +283,7 @@ function FileDrawer({ id, onClose, onChanged }: { id: string | null; onClose: ()
                       className="flex items-center justify-between gap-3 rounded-lg border border-line p-3 text-sm"
                     >
                       <div className="min-w-0">
-                        <p className="font-medium text-ink">{OPERATION_LABELS[j.operation]}</p>
+                        <p className="font-medium text-ink">{opLabel(j.operation)}</p>
                         <p className="text-xs text-muted">
                           {formatDuration(j.processingDurationMs)} ·{' '}
                           {j.outputSizeBytes !== null ? formatBytes(j.outputSizeBytes) : (j.errorCode ?? '—')}

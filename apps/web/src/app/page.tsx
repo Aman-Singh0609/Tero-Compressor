@@ -1,35 +1,32 @@
-import Link from 'next/link';
-import { FileTool } from '@/components/home/FileTool';
-import { Wordmark } from '@/components/Wordmark';
+import { Lock, WifiOff } from 'lucide-react';
+import { SiteFooter, SiteHeader } from '@/components/SiteHeader';
+import { ToolGrid } from '@/components/tools/ToolGrid';
 
 export default function HomePage() {
   return (
-    <div className="mx-auto flex min-h-dvh w-full max-w-4xl flex-col px-4 sm:px-6">
-      <header className="flex items-center justify-between py-5">
-        <Wordmark />
-        <Link
-          href="/admin"
-          className="rounded-lg px-3 py-2 text-sm text-muted transition-colors hover:bg-surface-2 hover:text-ink"
-        >
-          Admin
-        </Link>
-      </header>
-
+    <div className="mx-auto flex min-h-dvh w-full max-w-6xl flex-col px-4 sm:px-6">
+      <SiteHeader />
       <main className="flex-1 pb-16">
-        <section className="py-10 text-center sm:py-14">
+        <section className="py-8 text-center sm:py-12">
           <h1 className="text-4xl font-semibold tracking-tight text-ink sm:text-5xl">
             Private tools for everyday files.
           </h1>
-          <p className="mx-auto mt-3 max-w-xl text-base text-muted sm:text-lg">
-            Make PDFs, photos and videos smaller. Drop a file, pick what you need, download the result.
+          <p className="mx-auto mt-3 max-w-2xl text-base text-muted sm:text-lg">
+            Compress, merge, split, convert and protect PDFs, Word files and photos — all on your own computer, no
+            account, no cloud.
           </p>
+          <ul className="mt-5 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted">
+            <li className="flex items-center gap-2">
+              <Lock className="size-4" aria-hidden /> Files never leave your network
+            </li>
+            <li className="flex items-center gap-2">
+              <WifiOff className="size-4" aria-hidden /> Works without internet
+            </li>
+          </ul>
         </section>
-        <FileTool />
+        <ToolGrid />
       </main>
-
-      <footer className="border-t border-line py-6 text-center text-xs text-muted">
-        TERO · a private file toolbox for the family
-      </footer>
+      <SiteFooter />
     </div>
   );
 }

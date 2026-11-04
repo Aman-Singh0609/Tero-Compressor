@@ -1,12 +1,25 @@
 import { DocxProcessor } from './document/docxProcessor';
+import { DocxToolsProcessor } from './document/docxToolsProcessor';
 import { ImageProcessor } from './image/imageProcessor';
 import { isOperation, type OperationName } from './operations';
+import { PdfConvertProcessor } from './pdf/pdfConvertProcessor';
+import { PdfEditProcessor } from './pdf/pdfEditProcessor';
 import { PdfProcessor } from './pdf/pdfProcessor';
+import { PdfSecurityProcessor } from './pdf/pdfSecurityProcessor';
 import type { Processor } from './types';
 import { VideoProcessor } from './video/videoProcessor';
 
 const overrides = new Map<OperationName, Processor>();
-const defaults: Processor[] = [new ImageProcessor(), new PdfProcessor(), new DocxProcessor(), new VideoProcessor()];
+const defaults: Processor[] = [
+  new ImageProcessor(),
+  new PdfProcessor(),
+  new PdfEditProcessor(),
+  new PdfSecurityProcessor(),
+  new PdfConvertProcessor(),
+  new DocxProcessor(),
+  new DocxToolsProcessor(),
+  new VideoProcessor(),
+];
 
 export function processorFor(operation: string): Processor | undefined {
   if (!isOperation(operation)) return undefined;

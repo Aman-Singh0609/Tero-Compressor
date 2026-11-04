@@ -6,14 +6,15 @@ import { sha256File } from '../lib/hash';
 import { baseNameOf } from '../security/filename';
 import { processorFor } from '../processors/registry';
 import { ProcessorError, type ProcessorResult } from '../processors/types';
-import type { OperationName } from '../processors/operations';
+import { OPERATIONS, type OperationName } from '../processors/operations';
 import { fileRepository } from '../repositories/fileRepository';
 import { toolResultRepository } from '../repositories/toolResultRepository';
 import { jobRepository } from '../repositories/jobRepository';
 import { storage, type StorageArea } from '../storage';
+import { secretStore } from './secretStore';
 
 interface RunningJob {
-  fileId?: string;
+  fileIds: Set<string>;
   controller: AbortController;
   /** Settles once the job has fully stopped and released its files. */
   stopped: Promise<void>;
@@ -41,72 +42,123 @@ export function abortAllRunning(): void {
 export async function cancelJobsForFile(fileId: string): Promise<void> {
   for (const job of await jobRepository.activeJobsFor(fileId)) {
     await jobRepository.cancel(job.id);
+    secretStore.discard(job.id);
     cancelRunning(job.id);
   }
   await waitForStop(fileId);
 }
 
 /**
- * Wait until jobs of this file have released their input before its bytes are deleted (an open handle
+ * Wait until jobs using this file have released their inputs before its bytes are deleted (an open handle
  * makes deletion fail on Windows, and a vanished input would crash a half-finished job).
  */
 async function waitForStop(fileId: string): Promise<void> {
-  const pending = [...running.values()].filter((j) => j.fileId === fileId).map((j) => j.stopped);
+  const pending = [...running.values()].filter((j) => j.fileIds.has(fileId)).map((j) => j.stopped);
   if (pending.length === 0) return;
   await Promise.race([Promise.allSettled(pending), new Promise((resolve) => setTimeout(resolve, STOP_WAIT_MS))]);
 }
 
-function outputDisplayName(originalName: string, ext: string, operation: OperationName): string {
-  const suffix = operation === 'IMAGE_TO_PDF' || operation === 'VIDEO_EXTRACT_AUDIO' ? '' : '-tero';
-  return `${baseNameOf(originalName)}${suffix}.${ext}`;
+function categoryForExt(ext: string, fallback: string): string {
+  if (ext === 'pdf') return 'pdf';
+  if (ext === 'zip') return 'archive';
+  if (ext === 'txt' || ext === 'docx') return 'document';
+  if (ext === 'mp3') return 'audio';
+  if (['jpg', 'png', 'webp', 'avif', 'tiff', 'gif'].includes(ext)) return 'image';
+  if (ext === 'mp4') return 'video';
+  return fallback;
 }
 
-function failureFor(err: unknown): { code: string; message: string } {
+function outputDisplayName(firstName: string, inputCount: number, ext: string, operation: OperationName): string {
+  const base = baseNameOf(firstName);
+  const suffix = OPERATIONS[operation].outputSuffix;
+  const combined = inputCount > 1 && suffix === '' ? '-combined' : '';
+  return `${base}${suffix}${combined}.${ext}`;
+}
+
+function failureFor(err: unknown): { code: string; message: string; detail: string } {
   if (err instanceof ProcessorError) {
-    if (err.code === 'INVALID_FILE') return { code: 'INVALID_FILE', message: err.userMessage };
-    return { code: err.code === 'TIMEOUT' ? 'PROCESSING_TIMEOUT' : 'PROCESSING_FAILED', message: err.userMessage };
+    const detail = [
+      err.userMessage,
+      err.cause ? String(err.cause instanceof Error ? (err.cause.stack ?? err.cause.message) : err.cause) : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    if (err.code === 'INVALID_FILE') return { code: 'INVALID_FILE', message: err.userMessage, detail };
+    if (err.code === 'BAD_REQUEST') return { code: 'INVALID_OPTIONS', message: err.userMessage, detail };
+    return {
+      code: err.code === 'TIMEOUT' ? 'PROCESSING_TIMEOUT' : 'PROCESSING_FAILED',
+      message: err.userMessage,
+      detail,
+    };
   }
-  return { code: 'PROCESSING_FAILED', message: 'Something went wrong while processing this file.' };
+  const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
+  return { code: 'PROCESSING_FAILED', message: 'Something went wrong while processing this file.', detail };
 }
 
 /** Execute one queued job end to end. Never throws: failures are recorded on the job. */
 export async function runJob(jobId: string): Promise<void> {
-  if (!(await jobRepository.claim(jobId))) return; // cancelled or already claimed
+  if (!(await jobRepository.claim(jobId))) {
+    secretStore.discard(jobId);
+    return; // cancelled or already claimed
+  }
   const started = Date.now();
   const controller = new AbortController();
   let markStopped!: () => void;
   const stopped = new Promise<void>((resolve) => (markStopped = resolve));
-  const entry: RunningJob = { controller, stopped, markStopped };
+  const entry: RunningJob = { fileIds: new Set(), controller, stopped, markStopped };
   running.set(jobId, entry);
   const log = logger().child({ jobId });
   let outputPath: string | undefined;
-  let releaseInput: (() => Promise<void>) | undefined;
-  let fileId: string | undefined;
+  const releases: Array<() => Promise<void>> = [];
+  let inputIds: string[] = [];
   let inputFileFailed = false;
   const processorRef: { current?: ReturnType<typeof processorFor> } = {};
+  const secrets = secretStore.take(jobId);
 
   try {
     const job = await jobRepository.findById(jobId);
     if (!job) return;
-    fileId = job.fileId;
-    entry.fileId = job.fileId;
-    const file = await fileRepository.findStorageInfo(job.fileId);
-    if (!file || file.status === 'DELETED') throw new ProcessorError('This file has expired.', 'INVALID_FILE');
-    const area = file.storageArea as StorageArea;
-    if (!(await storage().exists(area, file.storedName))) {
-      throw new ProcessorError('The uploaded file is no longer available.', 'INVALID_FILE');
+    const tool = OPERATIONS[job.operation];
+    inputIds = job.inputs.length > 0 ? job.inputs.map((i) => i.file.id) : [job.fileId];
+    inputIds.forEach((id) => entry.fileIds.add(id));
+    const rows = await fileRepository.findStorageInfoMany(inputIds);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const files = inputIds.map((id) => byId.get(id));
+    if (files.some((f) => !f || f.status === 'DELETED'))
+      throw new ProcessorError('A file has expired.', 'INVALID_FILE');
+    const present = files as NonNullable<(typeof files)[number]>[];
+    for (const f of present) {
+      if (!(await storage().exists(f.storageArea as StorageArea, f.storedName))) {
+        throw new ProcessorError('An uploaded file is no longer available.', 'INVALID_FILE');
+      }
     }
     const processor = processorFor(job.operation);
     if (!processor) throw new ProcessorError('This operation is not available.');
     processorRef.current = processor;
+    if (tool.secretFields.some((k) => !secrets[k])) {
+      throw new ProcessorError('The password was lost because the server restarted. Please try again.', 'BAD_REQUEST');
+    }
 
-    await fileRepository.setStatus(file.id, 'PROCESSING');
+    for (const id of inputIds) await fileRepository.setStatus(id, 'PROCESSING');
     const options = (job.options ?? {}) as Record<string, unknown>;
-    const inputCopy = await storage().materialize(area, file.storedName);
-    releaseInput = inputCopy.release;
-    const inputPath = inputCopy.path;
-    outputPath = storage().allocateWorkPath(processor.outputExtensionFor(job.operation, options, file.extension));
-    const common = { inputPath, inputExt: file.extension, inputMime: file.mimeType, operation: job.operation, options };
+    const inputPaths: string[] = [];
+    for (const f of present) {
+      const copy = await storage().materialize(f.storageArea as StorageArea, f.storedName);
+      releases.push(copy.release);
+      inputPaths.push(copy.path);
+    }
+    const first = present[0]!;
+    outputPath = storage().allocateWorkPath(processor.outputExtensionFor(job.operation, options, first.extension));
+    const common = {
+      inputPath: inputPaths[0]!,
+      inputPaths,
+      inputNames: present.map((f) => f.originalName),
+      inputExt: first.extension,
+      inputMime: first.mimeType,
+      operation: job.operation,
+      options,
+      secrets,
+    };
 
     await processor.validate(common);
 
@@ -114,7 +166,7 @@ export async function runJob(jobId: string): Promise<void> {
     let lastValue = 0;
     const result: ProcessorResult = await processor.process({
       ...common,
-      inputSizeBytes: Number(file.sizeBytes),
+      inputSizeBytes: present.reduce((sum, f) => sum + Number(f.sizeBytes), 0),
       outputPath,
       signal: controller.signal,
       reportProgress: (percent) => {
@@ -136,16 +188,11 @@ export async function runJob(jobId: string): Promise<void> {
         const out = await fileRepository.create(
           {
             role: 'OUTPUT',
-            originalName: outputDisplayName(file.originalName, result.outputExt, job.operation),
+            originalName: outputDisplayName(first.originalName, present.length, result.outputExt, job.operation),
             storedName: stored.storedName,
             extension: result.outputExt,
             mimeType: result.outputMime,
-            category:
-              file.category === 'video' && result.outputExt === 'mp3'
-                ? 'audio'
-                : file.category === 'image' && result.outputExt === 'pdf'
-                  ? 'pdf'
-                  : file.category,
+            category: categoryForExt(result.outputExt, first.category),
             sizeBytes: stored.sizeBytes,
             storageArea: stored.area,
             storagePath: stored.storagePath,
@@ -173,7 +220,7 @@ export async function runJob(jobId: string): Promise<void> {
           info: result.info ?? {},
           outputExt: result.outputExt,
         });
-        await fileRepository.setStatus(file.id, 'AVAILABLE', tx);
+        for (const id of inputIds) await fileRepository.setStatus(id, 'AVAILABLE', tx);
       });
     } catch (err) {
       // keep storage and database consistent: no output bytes without a record
@@ -182,7 +229,7 @@ export async function runJob(jobId: string): Promise<void> {
         .catch(() => undefined);
       throw err;
     }
-    log.info({ fileId: file.id, operation: job.operation, durationMs: Date.now() - started }, 'job completed');
+    log.info({ fileIds: inputIds, operation: job.operation, durationMs: Date.now() - started }, 'job completed');
   } catch (err) {
     if (err instanceof CancelledError || (err instanceof ProcessorError && err.code === 'CANCELLED')) {
       await jobRepository.cancel(jobId);
@@ -199,17 +246,23 @@ export async function runJob(jobId: string): Promise<void> {
         'job failed',
       );
       await jobRepository
-        .fail(jobId, { errorCode: failure.code, errorMessage: failure.message, durationMs: Date.now() - started })
+        .fail(jobId, {
+          errorCode: failure.code,
+          errorMessage: failure.message,
+          errorDetail: failure.detail,
+          durationMs: Date.now() - started,
+        })
         .catch((e) => log.error({ err: String(e) }, 'could not record job failure'));
     }
-    if (fileId) {
-      await fileRepository.setStatus(fileId, inputFileFailed ? 'FAILED' : 'UPLOADED').catch(() => undefined);
+    for (const id of inputIds) {
+      await fileRepository.setStatus(id, inputFileFailed ? 'FAILED' : 'UPLOADED').catch(() => undefined);
     }
   } finally {
-    await releaseInput?.().catch(() => undefined);
+    for (const release of releases) await release().catch(() => undefined);
     if (outputPath) {
       await processorRef.current?.cleanup({ outputPath }).catch(() => undefined);
     }
+    secretStore.discard(jobId);
     running.delete(jobId);
     entry.markStopped();
   }

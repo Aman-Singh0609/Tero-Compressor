@@ -20,6 +20,14 @@ const IMAGE_JPEG: DetectedType = {
 };
 const IMAGE_PNG: DetectedType = { ext: 'png', mime: 'image/png', category: 'image', allowedExtensions: ['png'] };
 const IMAGE_WEBP: DetectedType = { ext: 'webp', mime: 'image/webp', category: 'image', allowedExtensions: ['webp'] };
+const IMAGE_GIF: DetectedType = { ext: 'gif', mime: 'image/gif', category: 'image', allowedExtensions: ['gif'] };
+const IMAGE_AVIF: DetectedType = { ext: 'avif', mime: 'image/avif', category: 'image', allowedExtensions: ['avif'] };
+const IMAGE_TIFF: DetectedType = {
+  ext: 'tiff',
+  mime: 'image/tiff',
+  category: 'image',
+  allowedExtensions: ['tif', 'tiff'],
+};
 const PDF: DetectedType = { ext: 'pdf', mime: 'application/pdf', category: 'pdf', allowedExtensions: ['pdf'] };
 const DOCX: DetectedType = {
   ext: 'docx',
@@ -34,7 +42,21 @@ const MKV: DetectedType = { ext: 'mkv', mime: 'video/x-matroska', category: 'vid
 const AVI: DetectedType = { ext: 'avi', mime: 'video/x-msvideo', category: 'video', allowedExtensions: ['avi'] };
 
 /** Every type TERO accepts today. The UI "supported formats" text is generated from this list. */
-export const SUPPORTED_TYPES: DetectedType[] = [IMAGE_JPEG, IMAGE_PNG, IMAGE_WEBP, PDF, DOCX, MP4, MOV, WEBM, MKV, AVI];
+export const SUPPORTED_TYPES: DetectedType[] = [
+  IMAGE_JPEG,
+  IMAGE_PNG,
+  IMAGE_WEBP,
+  IMAGE_GIF,
+  IMAGE_AVIF,
+  IMAGE_TIFF,
+  PDF,
+  DOCX,
+  MP4,
+  MOV,
+  WEBM,
+  MKV,
+  AVI,
+];
 
 const NON_VIDEO_BRANDS = new Set([
   'heic',
@@ -82,11 +104,15 @@ export async function detectType(filePath: string): Promise<DetectedType | null>
     return null;
   }
   if (head.toString('ascii', 0, 5) === '%PDF-') return PDF;
+  const sig6 = head.toString('ascii', 0, 6);
+  if (sig6 === 'GIF87a' || sig6 === 'GIF89a') return IMAGE_GIF;
+  if (startsWith(head, [0x49, 0x49, 0x2a, 0x00]) || startsWith(head, [0x4d, 0x4d, 0x00, 0x2a])) return IMAGE_TIFF;
   if (startsWith(head, [0x1a, 0x45, 0xdf, 0xa3])) return isWebm(await readHead(filePath, 4096)) ? WEBM : MKV;
   if (head.length >= 12 && head.toString('ascii', 4, 8) === 'ftyp') {
     const brand = head.toString('ascii', 8, 12);
     // HEIC/AVIF photos and M4A audio share the ISO container: recognise them so they are refused as
     // unsupported (a clear message) instead of being mistaken for MP4 video.
+    if (brand === 'avif') return IMAGE_AVIF; // still pictures only; AVIF sequences ('avis') stay refused
     if (NON_VIDEO_BRANDS.has(brand)) return null;
     return brand === 'qt  ' ? MOV : MP4;
   }

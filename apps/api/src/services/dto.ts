@@ -32,6 +32,10 @@ export function operationCatalog(category: string) {
     operation: op,
     label: OPERATIONS[op].label,
     description: OPERATIONS[op].description,
+    slug: OPERATIONS[op].slug,
+    group: OPERATIONS[op].group,
+    minFiles: OPERATIONS[op].minFiles,
+    maxFiles: OPERATIONS[op].maxFiles,
   }));
 }
 
@@ -52,6 +56,11 @@ interface JobRow {
   errorCode: string | null;
   errorMessage: string | null;
   resultInfo: unknown;
+  errorDetail?: string | null;
+  inputs?: Array<{
+    position: number;
+    file: { id: string; originalName: string; extension: string; category: string; sizeBytes: bigint | number };
+  }>;
   createdAt: Date;
   file?: { id: string; originalName: string; extension: string; category: string } | null;
 }
@@ -69,6 +78,11 @@ export function publicJob(j: JobRow) {
     id: j.id,
     fileId: j.fileId,
     fileName: j.file?.originalName ?? null,
+    inputs: (j.inputs ?? []).map((i) => ({
+      id: i.file.id,
+      name: i.file.originalName,
+      sizeBytes: Number(i.file.sizeBytes),
+    })),
     operation: j.operation,
     options: j.options,
     status: j.status,
@@ -84,4 +98,9 @@ export function publicJob(j: JobRow) {
     startedAt: j.startedAt,
     completedAt: j.completedAt,
   };
+}
+
+/** Administrator view of a job: everything public plus the technical failure detail. */
+export function adminJob(j: JobRow) {
+  return { ...publicJob(j), errorDetail: j.errorDetail ?? null };
 }

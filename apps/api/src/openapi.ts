@@ -24,7 +24,8 @@ export const ENDPOINTS: EndpointDoc[] = [
   {
     method: 'get',
     path: '/formats',
-    summary: 'Supported file types, operations and limits',
+    summary:
+      'Supported file types, limits and the full tool catalog (labels, accepted files, min/max files, option form fields)',
     success: 200,
     returns: '{ maxUploadBytes, retentionDays, types[], presets[], operations[] }',
     errors: [],
@@ -65,11 +66,11 @@ export const ENDPOINTS: EndpointDoc[] = [
   {
     method: 'post',
     path: '/jobs',
-    summary: 'Create a processing job',
-    body: '{ fileId, operation, options? }',
+    summary: 'Create a processing job (fileId for one file, or fileIds for several in order: merge, images to PDF)',
+    body: '{ fileId | fileIds[], operation, options? }  — options per tool are described by GET /formats (fields)',
     success: 202,
     returns: '{ jobId, status: "QUEUED" }',
-    errors: ['FILE_NOT_FOUND', 'FILE_EXPIRED', 'INVALID_OPERATION', 'INVALID_OPTIONS', 'VALIDATION_ERROR'],
+    errors: ['FILE_NOT_FOUND', 'FILE_EXPIRED', 'FILE_TOO_LARGE', 'INVALID_OPERATION', 'INVALID_OPTIONS', 'VALIDATION_ERROR', 'TOO_MANY_REQUESTS'],
   },
   {
     method: 'get',

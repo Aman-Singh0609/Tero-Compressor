@@ -102,6 +102,26 @@ const repo = {
     });
   },
 
+  /** Storage info for several files at once (multi-file jobs), one query. */
+  findStorageInfoMany(ids: string[]) {
+    return db().file.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        originalName: true,
+        storedName: true,
+        storageArea: true,
+        extension: true,
+        mimeType: true,
+        category: true,
+        sizeBytes: true,
+        status: true,
+        role: true,
+        expiresAt: true,
+      },
+    });
+  },
+
   async findMany(
     filter: FileFilter,
     sort: { field: 'createdAt' | 'sizeBytes' | 'originalName' | 'status'; order: 'asc' | 'desc' },
@@ -152,6 +172,7 @@ const repo = {
         ...(excludeIds.length ? { id: { notIn: excludeIds } } : {}),
         // never remove a file a queued/running job still needs
         jobs: { none: { status: { in: ['QUEUED', 'PROCESSING'] } } },
+        jobInputs: { none: { job: { status: { in: ['QUEUED', 'PROCESSING'] } } } },
       },
       orderBy: { expiresAt: 'asc' },
       take: batch,

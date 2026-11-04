@@ -2,20 +2,15 @@
 
 import Link from 'next/link';
 import { adminApi } from '@/lib/api';
-import {
-  formatBytes,
-  formatDuration,
-  formatNumber,
-  formatRelative,
-  OPERATION_LABELS,
-  friendlyError,
-} from '@/lib/format';
+import { formatBytes, formatDuration, formatNumber, formatRelative, friendlyError } from '@/lib/format';
 import { useResource } from '@/lib/hooks';
+import { useTools } from '@/lib/tools';
 import { BarList, DayBars, PageHeader, Section, StatCard } from '@/components/admin/common';
 import { Badge, EmptyState, ErrorState, Skeleton, statusTone } from '@/components/ui/primitives';
 
 export default function DashboardPage() {
   const { data, error, loading, refetch } = useResource(() => adminApi.dashboard(), []);
+  const { label: opLabel } = useTools();
 
   if (error && !data) return <ErrorState message={friendlyError(error.code, error.message)} onRetry={refetch} />;
   const d = data;
@@ -75,7 +70,7 @@ export default function DashboardPage() {
           ) : (
             <BarList
               rows={(d?.operations ?? []).map((o) => ({
-                label: OPERATION_LABELS[o.operation] ?? o.operation,
+                label: opLabel(o.operation),
                 value: o.count,
               }))}
             />
@@ -96,7 +91,7 @@ export default function DashboardPage() {
                       {f.file.originalName}
                     </Link>
                     <span className="text-xs text-muted">
-                      {OPERATION_LABELS[f.operation]} · {f.errorMessage ?? f.errorCode}
+                      {opLabel(f.operation)} · {f.errorMessage ?? f.errorCode}
                     </span>
                   </div>
                   <span className="shrink-0 text-xs text-muted">{formatRelative(f.failedAt)}</span>

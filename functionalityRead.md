@@ -43,7 +43,6 @@ apps/web/
   src/lib/api/                  client.ts (fetch/XHR wrapper), index.ts (typed API objects), types.ts (wire types)
   src/lib/                      format.ts (sizes, dates, friendly errors), hooks.ts (useResource, useDebounced), cn.ts
 docs/                           API.md (generated), repository-audit.md, performance-report.md
-legacy/                         archived pre-2.0 code (not used)
 ```
 
 Layering rule: **route → service → repository → Prisma**, and **service → processor / storage**. Routes never touch Prisma; repositories never touch HTTP; processors never touch HTTP or the database.
@@ -183,7 +182,17 @@ Triggers: the timer in `server.ts`, `npm run cleanup`, and `POST /admin/storage/
 Validates in order: operation name (`isOperation`) → file exists → not `DELETED` (`FILE_EXPIRED`) → file category accepted by the operation (`OPERATIONS[op].accepts`) → options parsed by that operation's zod schema (`OPTION_SCHEMAS`, `.strict()` so unknown keys are rejected → `INVALID_OPTIONS`). Then `jobRepository.create` (status `QUEUED`) and `jobQueue.enqueue(job.id)`.
 
 ### 8.2 Operations (`src/processors/operations.ts`)
-`IMAGE_COMPRESS` `{preset}` · `IMAGE_RESIZE` `{width?,height?,allowUpscale}` (≥1 dimension) · `IMAGE_CONVERT` `{format: jpeg|png|webp, preset}` · `IMAGE_STRIP_METADATA` · `IMAGE_TO_PDF` · `PDF_COMPRESS` `{preset}` · `DOCX_COMPRESS` `{preset}` · `VIDEO_COMPRESS` `{preset}` · `VIDEO_EXTRACT_AUDIO`. Presets: `HIGH_QUALITY`, `BALANCED` (UI label "Recommended"), `SMALLEST`. `suggestedOperations(category)` drives the upload response.
+The file is a **declarative catalog** — the single source of truth for 31 tools (`OPERATION_NAMES`, `OPTION_SCHEMAS`, `OPERATIONS: Record<OperationName, ToolDef>`). Each `ToolDef` has: `slug` (URL), `label`, `description`, `category` (pdf/word/image/video), `accepts`, `minFiles/maxFiles`, `fields` (form description: `type`, `label`, `hint`, `required`, `default`, `options`, `showIf`, `valueType`, `min/max/unit`), `secretFields`, `outputKind` (`file` | `zip`) and `outputSuffix`.
+- **PDF (16):** `PDF_COMPRESS, PDF_MERGE, PDF_SPLIT, PDF_EXTRACT_PAGES, PDF_REMOVE_PAGES, PDF_REORDER_PAGES, PDF_ROTATE, PDF_CROP, PDF_WATERMARK, PDF_PAGE_NUMBERS, PDF_PROTECT, PDF_UNLOCK, PDF_STRIP_METADATA, PDF_TO_IMAGES, PDF_TO_TEXT, PDF_TO_WORD`
+- **Word (4):** `DOCX_COMPRESS, DOCX_STRIP_METADATA, DOCX_TO_TEXT, DOCX_EXTRACT_IMAGES`
+- **Image (9):** `IMAGE_COMPRESS` (preset or `targetKb`), `IMAGE_RESIZE` (pixels or `percent`), `IMAGE_CONVERT` (jpeg/png/webp/avif/tiff/gif), `IMAGE_CROP`, `IMAGE_ROTATE`, `IMAGE_WATERMARK`, `IMAGE_ADJUST`, `IMAGE_STRIP_METADATA`, `IMAGE_TO_PDF` (multi-file)
+- **Video (2):** `VIDEO_COMPRESS, VIDEO_EXTRACT_AUDIO`
+Presets: `HIGH_QUALITY`, `BALANCED` (UI "Recommended"), `SMALLEST`. `parseOptions(op, raw)` runs the strict zod schema; `splitSecrets(op, options)` separates `secretFields` (passwords) from storable options; `suggestedOperations(category)` drives the upload response. `GET /formats` publishes the catalog, so the web app builds every form from it.
+
+### 8.2b Multi-file jobs, secrets, admin error detail
+- `POST /jobs` takes `fileId` **xor** `fileIds[]` (≤ 30, ordered). `ProcessingJob.fileId` is the first input; `JobInput(jobId, position, fileId)` stores the full ordered list. Retention (a file used by an active job is not purged) and cancel/delete logic consider `JobInput`, not just `fileId`. The runner materialises every input and passes `inputPaths` / `inputNames` to the processor.
+- **Secrets** (`services/secretStore.ts`): passwords for `PDF_PROTECT` / `PDF_UNLOCK` are split off by `splitSecrets`, held in memory keyed by job id and deleted when the job finishes or is cancelled. The DB `options` JSON contains `"[hidden]"`. After a restart the secret is gone, so the job fails with a friendly "please start again" message.
+- **`errorDetail`**: `failureFor()` stores a short technical reason (`ProcessingJob.errorDetail`). Only `dto.adminJob` returns it (admin job drawer); `publicJob` never does.
 
 ### 8.3 Queue (`src/queue/jobQueue.ts`)
 In-process FIFO with `JOB_CONCURRENCY` workers. `enqueue` pushes an id and pumps; each started id runs `runJob(id)` and re-pumps in `finally`. `onIdle()` resolves when nothing is queued/running. `recover()` is described in §3. The database is the source of truth; the queue holds only ids.
@@ -226,6 +235,16 @@ Then `doc.save({useObjectStreams:true})`; if the result is not smaller the origi
 
 ### 8.9 Word processor (`document/docxProcessor.ts`, JSZip + sharp)
 Re-encodes `word/media/*.jpg|jpeg|png` (same file names, so relationships stay valid) to a max side of 3000/1800/1200 px (quality 85/72/55; PNG stays PNG, level 9) only when smaller; rebuilds the zip with DEFLATE level 9; if the package is not smaller the original is returned.
+
+### 8.9b New offline PDF / Word / image engines (all pure npm or WebAssembly)
+| File | Tools | How it works |
+| --- | --- | --- |
+| `pdf/pdfEditProcessor.ts` | merge, split, extract, remove, reorder, rotate, crop, watermark, page numbers, strip metadata | pdf-lib. Page selections go through `shared/pageRanges.ts` (`parsePageSet/Sequence/Ranges`: 1-based, `3-`, `-5`, `last`, bounds-checked). Watermark/page numbers use bundled DejaVu fonts (`shared/fonts.ts`, fontkit) so non-English text works. Split writes a ZIP (≤ 500 files, generated entry names). |
+| `pdf/pdfSecurityProcessor.ts` + `pdf/qpdf.ts` | protect, unlock | qpdf compiled to WebAssembly, run in a **worker thread** with a timeout/abort, 250 MB limit. Protect = AES-256. Wrong password → "That password is not correct." |
+| `pdf/pdfConvertProcessor.ts` | PDF → images, text, Word | PDFium WASM (`@hyzyla/pdfium`) renders pages (≤ `MAX_RENDER_PAGES`) to PNG/JPEG → ZIP; extracts text; the `docx` library builds a text-only Word file. |
+| `document/docxToolsProcessor.ts` + `shared/docxZip.ts` | strip metadata, text, extract pictures | JSZip. `loadOfficeZip` rejects zip bombs from the *declared* sizes before inflating. Strip metadata clears core/app properties, comments, and accepts tracked changes. |
+| `image/imageProcessor.ts` + `image/watermarkSvg.ts` | compress (target KB), resize %, convert (+AVIF/TIFF/GIF), crop, rotate/flip, watermark, adjust | sharp. Target size is a quality binary search. Watermark text is turned into SVG paths by opentype.js (no system fonts needed). |
+`shared/pdfLoad.ts → loadPdf` is the one place PDFs are opened: it enforces `MAX_PDF_PAGES`, maps "encrypted" to "Use Unlock PDF" and corruption to a friendly "damaged" message (including pdf-lib's lazy errors).
 
 ### 8.10 Video processor (`video/videoProcessor.ts`, `video/ffmpeg.ts`)
 `ffprobe` checks there is a video stream (and an audio stream for extraction). `VIDEO_COMPRESS`: `libx264`, preset `medium`, CRF 20/25/30, `yuv420p`, AAC 160/128/96 kbps, `+faststart`, scale-down only (longest side ≤ none/1920/1280, `-2` keeps even dimensions, portrait-safe), maps `0:v:0` and optional `0:a:0?`. `VIDEO_EXTRACT_AUDIO`: `-vn`, `libmp3lame -q:a 2`. `runFfmpeg()` uses `spawn` with an **argument array** (no shell), adds `-progress pipe:1`, turns `out_time_us/ms` into 0–99 % using the probed duration (no duration → no progress → UI shows an indeterminate bar), enforces `VIDEO_TIMEOUT_MINUTES`, kills the process on `AbortSignal`, and keeps only the last 4 KB of stderr for the log (never shown to users). An MP4 that ends up larger than its source is replaced by the original.
@@ -286,7 +305,13 @@ Contract (`storage.ts`): `save`, `importFile`, `read`, `createReadStream`, `exis
 - `format.ts` – `formatBytes/Duration/Date/Relative`, preset and operation labels, and `friendlyError(code)` which maps backend codes to plain-language messages (family users never see codes or stack traces).
 - `hooks.ts` – `useResource(load, deps)` (loading is derived from a request key, stale data stays visible while refetching, `refetch()`), `useDebounced`.
 
-### 14.2 Home page (`app/page.tsx`, `components/home/FileTool.tsx`)
+### 14.2a Tool pages (current UI; replaces the old single `FileTool`)
+- `lib/tools.ts` `useTools()` loads the catalog from `/formats`. `app/page.tsx` shows `ToolGrid` (tabs All/PDF/Word/Image/Video + search, iLovePDF-style cards with `toolIcons.tsx`). `app/tools/[slug]/page.tsx` renders `ToolWorkspace` for one tool. `app/start/page.tsx` + `SmartStart` is "drop a file and we suggest tools".
+- `ToolWorkspace` is the state machine (`idle → uploading → ready → processing → done | failed`) for single and multi-file tools (add/reorder/remove files, per-file upload progress). `ToolForm` renders `fields` generically (`showIf`, numbers, password, select, checkbox, "pages" input) with labels, hints and `aria-invalid`. `lib/toolForm.ts` builds the options JSON and does fast client checks (the server validates again). `lib/resultSummary.ts` turns the backend's result info into plain sentences (pages in/out, images shrunk, target vs achieved KB…). `friendlyError` shows the backend's own message for `INVALID_OPTIONS`.
+- **Admin ⇄ TERO switch** (`components/ModeSwitch.tsx`): `SiteHeader` asks `authApi.session()` (a quiet `GET /admin/auth/me` that returns `null` on 401 and never redirects). Only a signed-in admin sees the "Use TERO | Admin" switch; visitors see no admin link at all. `AdminShell` shows the same switch in its top bar. It is navigation only — the admin cookie is shared and every `/admin/*` API route still checks the session on the server.
+- Admin pages show the new operations, input-file lists, and (jobs drawer) the technical `errorDetail`.
+
+### 14.2 Home page — original single-tool flow (superseded by 14.2a, kept for the state-machine description)
 `FileTool` is a state machine: `idle → uploading → ready → processing → done | failed`.
 - **idle**: drag-and-drop zone and "Choose file" (hidden `<input type=file>` whose `accept` comes from `/formats`; category tiles open the picker filtered to that category). Client-side size pre-check against `maxUploadBytes`. Errors are shown with `friendlyError`.
 - **uploading**: real percentage from XHR progress; at 100 % it shows an indeterminate "Checking file…" (server-side validation/storage); a **Cancel upload** button aborts the request.
@@ -316,7 +341,8 @@ Contract (`storage.ts`): `save`, `importFile`, `read`, `createReadStream`, `exis
 ## 15. Scripts and tooling
 `npm run dev|build|start|test|lint|typecheck` (root, fan out to both apps) · `db:create` (create database from `DATABASE_URL`) · `db:migrate` / `db:deploy` / `db:seed` / `db:generate` · `npm run cleanup -w apps/api` · `storage:to-mysql` · `docs:api` (regenerate `docs/API.md`) · `test:perf` (20 000-row measurements + `EXPLAIN`).
 
-## 16. Tests (`apps/api/tests`, 137 tests, real MySQL `tero_test`)
+## 16. Tests (`apps/api/tests`, 195 tests, real MySQL `tero_test`)
+New suites: `toolsPdf` (every PDF tool, wrong/right passwords, damaged and encrypted files), `toolsWordImage` (Word + image tools), `toolsCatalog` (catalog consistency, multi-file retention, cancel via a second input, admin-only `errorDetail`, per-tool result rows, resource limits); fixtures in `helpers/toolFixtures.ts`, `helpers/toolHarness.ts`. Earlier suites:
 `upload`, `jobs` (all processors incl. real FFmpeg and Flate PDFs), `adminAuth`, `adminFiles` (files/jobs/dashboard/storage/metrics), `vault`, `audit`, `retention`, `security` (filenames, path safety, env validation, headers), `database` (constraints, cascade/restrict, transactions, indexes), `openapi` (routes vs documentation), `workflow` (end to end), `mysqlStorage` (driver + MySQL-backed workflow + per-tool rows), `regression` (bugs below), `perf` (opt-in). `helpers/globalSetup.ts` creates the test DB and runs `prisma migrate deploy`; `helpers/setupEnv.ts` sets a temp storage dir and `STORAGE_DRIVER=local` (the MySQL driver is tested explicitly).
 
 ## 17. Bugs found and fixed during the test pass
@@ -340,5 +366,16 @@ Contract (`storage.ts`): `save`, `importFile`, `read`, `createReadStream`, `exis
 | Windows | Output file locked by sharp's cache / read stream (`EBUSY` on rename) | `sharp.cache(false)`, hash resolves on `close` |
 | Review | `/health` did not check the database | now runs `SELECT 1` |
 
+### 17b. Bugs found while building the 31-tool set
+| Bug | Fix |
+| --- | --- |
+| `@napi-rs/canvas` native add-on blocked by Windows Application Control | Switched to PDFium WebAssembly (pure WASM) |
+| qpdf `--is-encrypted` exit code 2 and stderr not captured | Capture worker stderr; "invalid password" ⇒ encrypted; friendly wrong-password error |
+| Damaged PDF reported as `PROCESSING_FAILED` (pdf-lib throws lazily) | `loadPdf` includes `getPageCount()` inside the `try` |
+| opentype.js crashed on GSUB format 2 when laying out text | Per-glyph layout |
+| Generic "Those settings aren't valid" in the UI | Show backend message for `INVALID_OPTIONS` |
+| Strip-metadata missed self-closing `<w:del/>` / `<w:ins/>` | Handled both forms |
+| Stale Next.js build served old chunks after changes | Kill old node processes, clear `.next`, rebuild |
+
 ## 18. Known limits
-No Docker/hosting setup yet; the job queue, rate limits and login throttle are in-memory (single API instance); family pages have no login (anyone with a file/job UUID can use it — IDs are random v4); PDF recompression covers 8-bit RGB/Gray images without masks (not CMYK/indexed); no audio/merge/split/Word→PDF tools; storing bytes in MySQL grows the database (set `STORAGE_DRIVER=local` to use disk); name search is a `LIKE '%…%'` scan; deep pagination uses `OFFSET`.
+No Docker/hosting setup yet; the job queue, rate limits and login throttle are in-memory (single API instance); family pages have no login (anyone with a file/job UUID can use it — IDs are random v4); PDF recompression covers 8-bit RGB/Gray images without masks (not CMYK/indexed); no Word→PDF (needs LibreOffice) or OCR; PDF→Word is text-only; PDF crop only sets the page box; `npm audit` shows 3 high findings in the Prisma CLI chain (needs Prisma 7); storing bytes in MySQL grows the database (set `STORAGE_DRIVER=local` to use disk); name search is a `LIKE '%…%'` scan; deep pagination uses `OFFSET`.

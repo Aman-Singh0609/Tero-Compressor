@@ -1,5 +1,6 @@
-import type { Operation } from '@prisma/client';
+import type { Operation, Prisma } from '@prisma/client';
 import type { Tx } from '../db/prisma';
+import { OPERATIONS } from '../processors/operations';
 
 export interface ToolResultInput {
   jobId: string;
@@ -13,6 +14,11 @@ const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFi
 const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
 const bool = (v: unknown): boolean => v === true;
 
+/** Options safe to keep in the tool record: passwords are already replaced by "[hidden]" upstream. */
+function details(r: ToolResultInput): Prisma.InputJsonValue {
+  return { options: r.options, info: r.info } as Prisma.InputJsonValue;
+}
+
 /**
  * Writes the tool-specific result row (ImageResult / PdfResult / DocumentResult / VideoResult) in the
  * same transaction that completes the job, so a job is never COMPLETED without its tool record.
@@ -21,12 +27,8 @@ export const toolResultRepository = {
   async create(tx: Tx, r: ToolResultInput): Promise<void> {
     const preset = str(r.options.preset);
     const keptOriginal = bool(r.info.keptOriginal);
-    switch (r.operation) {
-      case 'IMAGE_COMPRESS':
-      case 'IMAGE_RESIZE':
-      case 'IMAGE_CONVERT':
-      case 'IMAGE_STRIP_METADATA':
-      case 'IMAGE_TO_PDF':
+    switch (OPERATIONS[r.operation].category) {
+      case 'image':
         await tx.imageResult.create({
           data: {
             jobId: r.jobId,
@@ -39,36 +41,42 @@ export const toolResultRepository = {
             outputHeight: num(r.info.outputHeight),
             metadataStripped: r.operation === 'IMAGE_STRIP_METADATA',
             keptOriginal,
+            details: details(r),
           },
           select: { id: true },
         });
         return;
-      case 'PDF_COMPRESS':
+      case 'pdf':
         await tx.pdfResult.create({
           data: {
             jobId: r.jobId,
+            operation: r.operation,
             preset,
+            inputPages: num(r.info.inputPages),
+            outputPages: num(r.info.outputPages),
             imagesFound: num(r.info.imagesFound) ?? 0,
             imagesRecompressed: num(r.info.imagesRecompressed) ?? 0,
             keptOriginal,
+            details: details(r),
           },
           select: { id: true },
         });
         return;
-      case 'DOCX_COMPRESS':
+      case 'word':
         await tx.documentResult.create({
           data: {
             jobId: r.jobId,
+            operation: r.operation,
             preset,
-            imagesFound: num(r.info.imagesFound) ?? 0,
+            imagesFound: num(r.info.imagesFound) ?? num(r.info.images) ?? 0,
             imagesRecompressed: num(r.info.imagesRecompressed) ?? 0,
             keptOriginal,
+            details: details(r),
           },
           select: { id: true },
         });
         return;
-      case 'VIDEO_COMPRESS':
-      case 'VIDEO_EXTRACT_AUDIO':
+      case 'video':
         await tx.videoResult.create({
           data: {
             jobId: r.jobId,

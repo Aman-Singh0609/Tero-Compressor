@@ -1,4 +1,4 @@
-import { del, get, getPage, patch, post, postForm, qs, uploadWithProgress } from './client';
+import { del, get, getOrNullIfSignedOut, getPage, patch, post, postForm, qs, uploadWithProgress } from './client';
 import type {
   AdminFileDetail,
   AdminFileRow,
@@ -27,13 +27,15 @@ export const filesApi = {
   formats: () => get<Formats>('/formats'),
   upload: (file: File, onProgress: (f: number) => void, signal?: AbortSignal) =>
     uploadWithProgress<UploadResult>('/files/upload', file, onProgress, signal),
+  get: (id: string) => get<UploadResult>(`/files/${id}`),
   remove: (id: string) => del<{ id: string; status: 'DELETED' }>(`/files/${id}`),
   thumbnailUrl: (id: string) => `/api/v1/files/${id}/thumbnail`,
 };
 
 export const jobsApi = {
-  create: (fileId: string, operation: OperationName, options?: JobOptions) =>
-    post<{ jobId: string; status: string }>('/jobs', { fileId, operation, options }),
+  /** One or several input files (merge and images-to-PDF take several, in the order given). */
+  create: (fileIds: string[], operation: OperationName, options?: JobOptions) =>
+    post<{ jobId: string; status: string }>('/jobs', { fileIds, operation, options }),
   get: (id: string) => get<Job>(`/jobs/${id}`),
   cancel: (id: string) => post<Job>(`/jobs/${id}/cancel`),
   downloadUrl: (id: string) => `/api/v1/jobs/${id}/download`,
@@ -44,6 +46,8 @@ export const authApi = {
     post<{ admin: AdminIdentity; expiresAt: string }>('/admin/auth/login', { email, password }),
   logout: () => post<{ loggedOut: true }>('/admin/auth/logout'),
   me: () => get<{ admin: AdminIdentity }>('/admin/auth/me'),
+  /** The signed-in admin, or `null` for an ordinary visitor (never redirects). */
+  session: async () => (await getOrNullIfSignedOut<{ admin: AdminIdentity }>('/admin/auth/me'))?.admin ?? null,
 };
 
 export const adminApi = {

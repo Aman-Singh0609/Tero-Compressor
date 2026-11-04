@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import { decodePDFRawStream, PDFDocument, PDFName, PDFNumber, PDFRawStream } from 'pdf-lib';
 import sharp, { type Sharp } from 'sharp';
 import type { OperationName, Preset } from '../operations';
+import { loadPdf } from '../shared/pdfLoad';
 import { ProcessorError, type Processor, type ProcessorInput, type ProcessorResult } from '../types';
 
 const QUALITY: Record<Preset, number> = { HIGH_QUALITY: 85, BALANCED: 70, SMALLEST: 50 };
@@ -47,18 +48,7 @@ export class PdfProcessor implements Processor {
   }
 
   private async load(bytes: Buffer): Promise<PDFDocument> {
-    try {
-      return await PDFDocument.load(bytes, { updateMetadata: false });
-    } catch (err) {
-      const encrypted = /encrypt/i.test(String(err));
-      throw new ProcessorError(
-        encrypted
-          ? 'This PDF is password-protected. Unlock it first, then try again.'
-          : 'This PDF could not be read. It may be damaged.',
-        'INVALID_FILE',
-        { cause: err },
-      );
-    }
+    return (await loadPdf(bytes)).doc;
   }
 
   async process(input: ProcessorInput): Promise<ProcessorResult> {

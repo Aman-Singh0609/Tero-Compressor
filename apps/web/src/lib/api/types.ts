@@ -31,16 +31,8 @@ export type FileStatus = 'UPLOADED' | 'PROCESSING' | 'AVAILABLE' | 'FAILED' | 'D
 export type JobStatus = 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
 export type Preset = 'HIGH_QUALITY' | 'BALANCED' | 'SMALLEST';
 
-export type OperationName =
-  | 'IMAGE_COMPRESS'
-  | 'IMAGE_RESIZE'
-  | 'IMAGE_CONVERT'
-  | 'IMAGE_STRIP_METADATA'
-  | 'IMAGE_TO_PDF'
-  | 'PDF_COMPRESS'
-  | 'DOCX_COMPRESS'
-  | 'VIDEO_COMPRESS'
-  | 'VIDEO_EXTRACT_AUDIO';
+/** Operation ids come from the backend tool catalog (see ToolInfo); they are plain strings here on purpose. */
+export type OperationName = string;
 
 export interface UploadedFile {
   id: string;
@@ -58,6 +50,10 @@ export interface OperationSuggestion {
   operation: OperationName;
   label: string;
   description: string;
+  slug: string;
+  group: ToolGroup;
+  minFiles: number;
+  maxFiles: number;
 }
 
 export interface UploadResult {
@@ -65,34 +61,62 @@ export interface UploadResult {
   suggestedOperations: OperationSuggestion[];
 }
 
+export type ToolCategory = 'pdf' | 'word' | 'image' | 'video';
+export type ToolGroup = 'optimize' | 'organize' | 'convert' | 'edit' | 'security' | 'privacy';
+
+export interface ToolField {
+  key: string;
+  type: 'select' | 'number' | 'text' | 'password' | 'checkbox' | 'pages';
+  label: string;
+  hint?: string;
+  default?: string | number | boolean;
+  options?: Array<{ value: string; label: string }>;
+  valueType?: 'number';
+  min?: number;
+  max?: number;
+  unit?: string;
+  placeholder?: string;
+  maxLength?: number;
+  required?: boolean;
+  showIf?: { key: string; equals: string | number | boolean };
+}
+
+export interface ToolInfo {
+  operation: OperationName;
+  label: string;
+  description: string;
+  slug: string;
+  category: ToolCategory;
+  group: ToolGroup;
+  icon: string;
+  accepts: FileCategory[];
+  minFiles: number;
+  maxFiles: number;
+  fields: ToolField[];
+  secretFields: string[];
+  reducesSize: boolean;
+  outputKind: 'file' | 'zip';
+  outputSuffix: string;
+}
+
 export interface Formats {
   maxUploadBytes: number;
   retentionDays: number;
   types: Array<{ extension: string; mimeType: string; category: FileCategory }>;
   presets: Preset[];
-  operations: Array<{
-    operation: OperationName;
-    label: string;
-    description: string;
-    accepts: FileCategory[];
-    reducesSize: boolean;
-  }>;
+  operations: ToolInfo[];
 }
 
-export interface JobOptions {
-  preset?: Preset;
-  width?: number;
-  height?: number;
-  allowUpscale?: boolean;
-  format?: 'jpeg' | 'png' | 'webp';
-}
+/** Options are described by the tool's `fields`; the backend validates them. */
+export type JobOptions = Record<string, string | number | boolean>;
 
 export interface Job {
   id: string;
   fileId: string;
   fileName: string | null;
+  inputs: Array<{ id: string; name: string; sizeBytes: number }>;
   operation: OperationName;
-  options: JobOptions | null;
+  options: Record<string, unknown> | null;
   status: JobStatus;
   progress: number;
   originalSizeBytes: number;
@@ -105,6 +129,8 @@ export interface Job {
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
+  /** Administrators only. */
+  errorDetail?: string | null;
 }
 
 // ---- admin -------------------------------------------------------------

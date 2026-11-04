@@ -38,6 +38,28 @@ enum Operation {
   DOCX_COMPRESS
   VIDEO_COMPRESS
   VIDEO_EXTRACT_AUDIO
+  PDF_MERGE
+  PDF_SPLIT
+  PDF_EXTRACT_PAGES
+  PDF_REMOVE_PAGES
+  PDF_REORDER_PAGES
+  PDF_ROTATE
+  PDF_WATERMARK
+  PDF_PAGE_NUMBERS
+  PDF_CROP
+  PDF_PROTECT
+  PDF_UNLOCK
+  PDF_STRIP_METADATA
+  PDF_TO_IMAGES
+  PDF_TO_TEXT
+  PDF_TO_WORD
+  DOCX_STRIP_METADATA
+  DOCX_TO_TEXT
+  DOCX_EXTRACT_IMAGES
+  IMAGE_CROP
+  IMAGE_ROTATE
+  IMAGE_WATERMARK
+  IMAGE_ADJUST
 }
 
 enum AuditAction {
@@ -87,24 +109,25 @@ model AdminSession {
 
 /// Metadata for temporary user files (uploads and processor outputs). Bytes live in storage.
 model File {
-  id            String        @id @default(uuid()) @db.Char(36)
-  role          FileRole      @default(UPLOAD)
-  originalName  String        @db.VarChar(255)
-  storedName    String        @unique @db.VarChar(80)
-  extension     String        @db.VarChar(16)
-  mimeType      String        @db.VarChar(100)
-  category      String        @db.VarChar(16) // image | pdf | video | audio | document
+  id            String          @id @default(uuid()) @db.Char(36)
+  role          FileRole        @default(UPLOAD)
+  originalName  String          @db.VarChar(255)
+  storedName    String          @unique @db.VarChar(80)
+  extension     String          @db.VarChar(16)
+  mimeType      String          @db.VarChar(100)
+  category      String          @db.VarChar(16) // image | pdf | video | audio | document
   sizeBytes     BigInt
-  storageArea   String        @db.VarChar(16)
-  storagePath   String        @db.VarChar(255) // relative to the storage root, never user-supplied
-  checksum      String        @db.Char(64)
-  status        FileStatus    @default(UPLOADED)
+  storageArea   String          @db.VarChar(16)
+  storagePath   String          @db.VarChar(255) // relative to the storage root, never user-supplied
+  checksum      String          @db.Char(64)
+  status        FileStatus      @default(UPLOADED)
   expiresAt     DateTime?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
   deletedAt     DateTime?
   jobs          ProcessingJob[] @relation("JobInput")
   producedByJob ProcessingJob?  @relation("JobOutput")
+  jobInputs     JobInput[]      @relation("InputOfJobs")
 
   @@index([createdAt])
   @@index([status, createdAt])
@@ -114,27 +137,42 @@ model File {
   @@index([role, createdAt])
 }
 
+/// Every input file of a job in order (merge / images-to-PDF use several). ProcessingJob.fileId is the first one.
+model JobInput {
+  jobId    String        @db.Char(36)
+  position Int
+  fileId   String        @db.Char(36)
+  job      ProcessingJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  file     File          @relation("InputOfJobs", fields: [fileId], references: [id], onDelete: Restrict)
+
+  @@id([jobId, position])
+  @@index([fileId])
+}
+
 model ProcessingJob {
-  id                   String     @id @default(uuid()) @db.Char(36)
-  fileId               String     @db.Char(36)
+  id                   String          @id @default(uuid()) @db.Char(36)
+  fileId               String          @db.Char(36)
   operation            Operation
   options              Json?
-  status               JobStatus  @default(QUEUED)
-  progress             Int        @default(0)
+  status               JobStatus       @default(QUEUED)
+  progress             Int             @default(0)
   originalSizeBytes    BigInt
   outputSizeBytes      BigInt?
-  outputFileId         String?    @unique @db.Char(36)
+  outputFileId         String?         @unique @db.Char(36)
   startedAt            DateTime?
   completedAt          DateTime?
   failedAt             DateTime?
   processingDurationMs Int?
-  errorCode            String?    @db.VarChar(64)
-  errorMessage         String?    @db.VarChar(500)
+  errorCode            String?         @db.VarChar(64)
+  errorMessage         String?         @db.VarChar(500)
   resultInfo           Json?
-  createdAt            DateTime   @default(now())
-  updatedAt            DateTime   @updatedAt
-  file                 File       @relation("JobInput", fields: [fileId], references: [id], onDelete: Restrict)
-  outputFile           File?      @relation("JobOutput", fields: [outputFileId], references: [id], onDelete: SetNull)
+  /// Technical failure detail for administrators only; never returned by the public API.
+  errorDetail          String?         @db.Text
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+  file                 File            @relation("JobInput", fields: [fileId], references: [id], onDelete: Restrict)
+  outputFile           File?           @relation("JobOutput", fields: [outputFileId], references: [id], onDelete: SetNull)
+  inputs               JobInput[]
   videoResult          VideoResult?
   documentResult       DocumentResult?
   pdfResult            PdfResult?
@@ -226,6 +264,7 @@ model ImageResult {
   outputHeight     Int?
   metadataStripped Boolean       @default(false)
   keptOriginal     Boolean       @default(false)
+  details          Json?
   createdAt        DateTime      @default(now())
   job              ProcessingJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
@@ -236,7 +275,11 @@ model ImageResult {
 model PdfResult {
   id                 String        @id @default(uuid()) @db.Char(36)
   jobId              String        @unique @db.Char(36)
+  operation          String        @default("PDF_COMPRESS") @db.VarChar(32)
   preset             String?       @db.VarChar(16)
+  inputPages         Int?
+  outputPages        Int?
+  details            Json?
   imagesFound        Int           @default(0)
   imagesRecompressed Int           @default(0)
   keptOriginal       Boolean       @default(false)
@@ -250,7 +293,9 @@ model PdfResult {
 model DocumentResult {
   id                 String        @id @default(uuid()) @db.Char(36)
   jobId              String        @unique @db.Char(36)
+  operation          String        @default("DOCX_COMPRESS") @db.VarChar(32)
   preset             String?       @db.VarChar(16)
+  details            Json?
   imagesFound        Int           @default(0)
   imagesRecompressed Int           @default(0)
   keptOriginal       Boolean       @default(false)

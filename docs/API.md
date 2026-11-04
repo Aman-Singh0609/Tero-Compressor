@@ -16,7 +16,7 @@ Unauthenticated calls return `401 UNAUTHORIZED`. File and job ids are random UUI
 
 ### `GET /api/v1/formats`
 
-Supported file types, operations and limits.
+Supported file types, limits and the full tool catalog (labels, accepted files, min/max files, option form fields).
 
 - **Auth:** none
 - **Success:** `200` → { maxUploadBytes, retentionDays, types[], presets[], operations[] }
@@ -56,12 +56,12 @@ Delete a file and everything generated from it.
 
 ### `POST /api/v1/jobs`
 
-Create a processing job.
+Create a processing job (fileId for one file, or fileIds for several in order: merge, images to PDF).
 
 - **Auth:** none
-- **Body (JSON):** `{ fileId, operation, options? }`
+- **Body (JSON):** `{ fileId | fileIds[], operation, options? }  — options per tool are described by GET /formats (fields)`
 - **Success:** `202` → { jobId, status: "QUEUED" }
-- **Errors:** `FILE_NOT_FOUND`, `FILE_EXPIRED`, `INVALID_OPERATION`, `INVALID_OPTIONS`, `VALIDATION_ERROR`
+- **Errors:** `FILE_NOT_FOUND`, `FILE_EXPIRED`, `FILE_TOO_LARGE`, `INVALID_OPERATION`, `INVALID_OPTIONS`, `VALIDATION_ERROR`, `TOO_MANY_REQUESTS`
 
 ### `GET /api/v1/jobs/{id}`
 

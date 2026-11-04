@@ -19,8 +19,16 @@ const JOB_SELECT = {
   errorCode: true,
   errorMessage: true,
   resultInfo: true,
+  errorDetail: true,
   createdAt: true,
   file: { select: { id: true, originalName: true, extension: true, category: true } },
+  inputs: {
+    orderBy: { position: 'asc' },
+    select: {
+      position: true,
+      file: { select: { id: true, originalName: true, extension: true, category: true, sizeBytes: true } },
+    },
+  },
 } satisfies Prisma.ProcessingJobSelect;
 
 export interface JobFilter {
@@ -33,13 +41,23 @@ function where(f: JobFilter): Prisma.ProcessingJobWhereInput {
   return {
     ...(f.status ? { status: f.status } : {}),
     ...(f.operation ? { operation: f.operation } : {}),
-    ...(f.fileId ? { fileId: f.fileId } : {}),
+    ...(f.fileId ? { OR: [{ fileId: f.fileId }, { inputs: { some: { fileId: f.fileId } } }] } : {}),
   };
 }
 
 const repo = {
-  create(data: { fileId: string; operation: Operation; options: Prisma.InputJsonValue; originalSizeBytes: number }) {
-    return db().processingJob.create({ data, select: JOB_SELECT });
+  /** Creates the job and its ordered input list in one write. `fileIds[0]` is also stored as the primary fileId. */
+  create(data: { fileIds: string[]; operation: Operation; options: Prisma.InputJsonValue; originalSizeBytes: number }) {
+    return db().processingJob.create({
+      data: {
+        fileId: data.fileIds[0] as string,
+        operation: data.operation,
+        options: data.options,
+        originalSizeBytes: data.originalSizeBytes,
+        inputs: { create: data.fileIds.map((fileId, position) => ({ fileId, position })) },
+      },
+      select: JOB_SELECT,
+    });
   },
 
   findById(id: string) {
@@ -74,7 +92,11 @@ const repo = {
     return db().processingJob.updateMany({ where: { id, status: 'PROCESSING' }, data: { progress } });
   },
 
-  fail(id: string, data: { errorCode: string; errorMessage: string; durationMs?: number }, tx?: Tx) {
+  fail(
+    id: string,
+    data: { errorCode: string; errorMessage: string; errorDetail?: string; durationMs?: number },
+    tx?: Tx,
+  ) {
     return (tx ?? db()).processingJob.updateMany({
       where: { id, status: { in: ['QUEUED', 'PROCESSING'] } },
       data: {
@@ -82,6 +104,7 @@ const repo = {
         failedAt: new Date(),
         errorCode: data.errorCode,
         errorMessage: data.errorMessage.slice(0, 500),
+        ...(data.errorDetail ? { errorDetail: data.errorDetail.slice(0, 4000) } : {}),
         ...(data.durationMs !== undefined ? { processingDurationMs: data.durationMs } : {}),
       },
     });
@@ -122,8 +145,9 @@ const repo = {
   },
 
   activeJobsFor(fileId: string) {
+    // a file can be the primary input or one of several inputs (merge, images to PDF)
     return db().processingJob.findMany({
-      where: { fileId, status: { in: ['QUEUED', 'PROCESSING'] } },
+      where: { status: { in: ['QUEUED', 'PROCESSING'] }, OR: [{ fileId }, { inputs: { some: { fileId } } }] },
       select: { id: true },
     });
   },

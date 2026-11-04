@@ -1,5 +1,3 @@
-import type { OperationName, Preset } from './api';
-
 export function formatBytes(bytes: number | null | undefined): string {
   if (bytes === null || bytes === undefined) return '—';
   if (bytes < 1024) return `${bytes} B`;
@@ -43,24 +41,6 @@ export function formatNumber(n: number): string {
   return new Intl.NumberFormat().format(n);
 }
 
-export const PRESET_LABELS: Record<Preset, { label: string; hint: string }> = {
-  HIGH_QUALITY: { label: 'High quality', hint: 'Looks the same, smaller saving' },
-  BALANCED: { label: 'Recommended', hint: 'Best balance for most files' },
-  SMALLEST: { label: 'Smallest file', hint: 'Biggest saving, some quality loss' },
-};
-
-export const OPERATION_LABELS: Record<OperationName, string> = {
-  IMAGE_COMPRESS: 'Compress image',
-  IMAGE_RESIZE: 'Resize image',
-  IMAGE_CONVERT: 'Convert image',
-  IMAGE_STRIP_METADATA: 'Remove metadata',
-  IMAGE_TO_PDF: 'Image to PDF',
-  PDF_COMPRESS: 'Compress PDF',
-  DOCX_COMPRESS: 'Compress Word file',
-  VIDEO_COMPRESS: 'Compress video',
-  VIDEO_EXTRACT_AUDIO: 'Extract audio',
-};
-
 /** Friendly copy for backend error codes; family users never see raw codes or technical text. */
 const FRIENDLY: Record<string, string> = {
   INVALID_FILE: 'We couldn’t read this file. It may be damaged or renamed.',
@@ -86,6 +66,8 @@ const FRIENDLY: Record<string, string> = {
 };
 
 export function friendlyError(code: string | null | undefined, fallback?: string | null): string {
+  // option and page-number problems carry a specific, user-safe sentence (e.g. "Page 9 does not exist")
+  if (code === 'INVALID_OPTIONS' && fallback) return fallback;
   if (code && FRIENDLY[code]) return FRIENDLY[code];
   return fallback || FRIENDLY.INTERNAL_ERROR!;
 }
